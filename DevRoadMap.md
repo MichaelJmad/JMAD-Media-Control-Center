@@ -144,14 +144,16 @@ The `Appearance Profiles` system manages two categories of settings simultaneous
 
 The application ships with three base themes, each offering a Dark Mode and a Light Mode (using muted gray backgrounds to prevent eye strain).
 
-| Theme Name | Mode | Primary Background | Accent Color | Text Color |
-| :--- | :--- | :--- | :--- | :--- |
-| **Jmad** | **Dark (Default)** | Deep Charcoal Gray | Dark Greenish Gray | Muted White |
-| **Jmad** | **Light** | Muted Light Gray | Pale Greenish Gray | Charcoal Gray |
-| **Mike** | **Dark** | Deep Charcoal Gray | Bright Pink | Muted White |
-| **Mike** | **Light** | Muted Light Gray | Soft Pastel Pink | Charcoal Gray |
-| **Kerberos** | **Dark** | Deep Charcoal Gray | Nuclear Warning Orange | Muted White |
-| **Kerberos** | **Light** | Muted Light Gray | Soft Pale Orange | Charcoal Gray |
+| Theme Name | Mode | Primary Background | Accent Color | Accent HEX-# | Text Color |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Jmad** | **Dark (Default)** | Deep Charcoal Gray | Dark Greenish Gray | #3d543a | Muted White |
+| **Jmad** | **Light** | Muted Light Gray | Pale Greenish Gray | #accea7 | Charcoal Gray |
+| **Mike** | **Dark** | Deep Charcoal Gray | Bright Pinkish | #9a0d8f | Muted White |
+| **Mike** | **Light** | Muted Light Gray | Soft Pastel Pink | #ed83e4 | Charcoal Gray |
+| **Kerberos** | **Dark** | Deep Charcoal Gray | Nuclear Warning Orange | #ff8b26 | Muted White |
+| **Kerberos** | **Light** | Muted Light Gray | Soft Pale Orange | #ffa85c | Charcoal Gray |
+
+ - Good place for looking at HEX codes - https://imagecolorpicker.com/color-code.
 
 ---
 
