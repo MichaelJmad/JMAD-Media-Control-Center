@@ -1,1 +1,168 @@
-<h1>JMAD Media Tool: Developers Roadmap (Version 1)</h1><h2>1. Architectural Overview &amp; Data Flow</h2><p>The JMAD Media Tool operates as a persistent, single-instance application responsible for managing defined file system paths and persistent user settings. All processes prioritize non-destructive, preview-first operations.</p><h3>1.1 Core Application Components</h3><table><tbody><tr><th><p>Component</p></th><th><p>Responsibility</p></th><th><p>Persistent Data Storage</p></th></tr><tr><td><p><strong>Directory Monitor Service</strong></p></td><td><p>Persistent, low-impact background thread. Scans <code>Staging Path</code> and <code>Watch Directory</code>. Triggers <strong>File Detection Workflow</strong>.</p></td><td><p>Configuration settings (Paths, Scan Interval).</p></td></tr><tr><td><p><strong>State Manager</strong></p></td><td><p>Centralized authority for all Media Title statuses (Gray, Blue, Green, Error). Manages transitions and updates the main UI.</p></td><td><p><strong>Media Title Index:</strong> Stores name, source path, target path (if processed), current state, and flag data.</p></td></tr><tr><td><p><strong>Metadata Engine</strong></p></td><td><p>Handles external API calls (TMDB, TVDB) and manages the generation/reading of NFO files and artwork assets.</p></td><td><p>API Keys, Preferred Languages, Default Watch Order.</p></td></tr><tr><td><p><strong>File Handler</strong></p></td><td><p>Executes all file system commands (Rename, Move, Delete, Rollback). <strong>Must ensure all moves/renames are atomic operations.</strong></p></td><td><p>Naming Templates, Fluff Regex Patterns.</p></td></tr><tr><td><p><strong>Appearance Profiles</strong></p></td><td><p>Manages all visual settings (Themes, Status Colors, Icons).</p></td><td><p>Saved custom profiles (JSON).</p></td></tr></tbody></table><h3>1.2 File Detection Workflow (Directory Monitor)</h3><ol><li><p><strong>Trigger:</strong> <code>Directory Monitor Service</code> detects new/changed content in <code>Staging Path</code> or <code>Watch Directory</code>.</p></li><li><p><strong>Move (If applicable):</strong> If content is detected in the <code>Watch Directory</code>, the <code>File Handler</code> executes an atomic move to the <code>Staging Path</code>.</p></li><li><p><strong>Initial Scan:</strong> The <code>File Handler</code> performs a recursive scan of the new folder/file structure.</p></li><li><p><strong>Fluff Removal (Initial):</strong> <code>File Handler</code> applies the default <strong>Fluff Regex Patterns</strong> to the root folder name and contained files.</p></li><li><p><strong>Index/State Assignment:</strong> A new entry is created in the <code>State Manager</code>.</p></li><li><p><strong>UI Update:</strong> The new Media Title is displayed in the Staging Directory UI with the <strong>Unorganized (Gray)</strong> status.</p></li></ol><h2>2. Core State Management and Workflow</h2><p>All media titles progress through five primary states. State transitions are only triggered by explicit user interaction or automated post-processing routines.</p><h3>2.1 State Definitions and Transitions</h3><table><tbody><tr><th><p>State (Icon/Color)</p></th><th><p>Definition</p></th><th><p>Triggering Function</p></th><th><p>Next States</p></th></tr><tr><td><p><strong>⚪ Unorganized (Gray)</strong></p></td><td><p>Raw input. Only Fluff Removal is applied. Source/target structures are undefined.</p></td><td><p><code>Directory Monitor</code> / User creates a new entry.</p></td><td><p><math-inline class="math-inline math-node" title="" contenteditable="false"><span class="math-render"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height: 0.3669em;"></span><span class="mrel">→</span></span></span></span></span></math-inline> <strong>Processing (Blue)</strong></p></td></tr><tr><td><p><strong>🔵 Processing (Blue)</strong></p></td><td><p>Files are mapped, structured, and named according to templates. Naming is correct, but metadata is absent.</p></td><td><p><code>processOrganize()</code> / <code>processRawFile()</code></p></td><td><p><math-inline class="math-inline math-node" title="" contenteditable="false"><span class="math-render"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height: 0.3669em;"></span><span class="mrel">→</span></span></span></span></span></math-inline> <strong>Ready (Green)</strong></p></td></tr><tr><td><p><strong>🟢 Ready to Move (Green)</strong></p></td><td><p>Complete and finalized. NFOs, artwork, and anchoring data are generated and saved internally. Safe for deployment.</p></td><td><p><code>processMetadataFinalize()</code></p></td><td><p><math-inline class="math-inline math-node" title="" contenteditable="false"><span class="math-render"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height: 0.3669em;"></span><span class="mrel">→</span></span></span></span></span></math-inline> <strong>Live (Catalogue)</strong></p></td></tr><tr><td><p><strong>🟡 Warning (Yellow)</strong></p></td><td><p>Non-critical issue (e.g., Uncategorized files, quality check failure). Does not block state transition.</p></td><td><p><code>setFlag(WARNING)</code></p></td><td><p>N/A (Applies to any state)</p></td></tr><tr><td><p><strong>🔴 Critical Error (Red)</strong></p></td><td><p>Core file system operation failed (e.g., failed rollback, permissions denied). All processes are blocked.</p></td><td><p><code>setError(CRITICAL)</code></p></td><td><p><math-inline class="math-inline math-node" title="" contenteditable="false"><span class="math-render"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height: 0.3669em;"></span><span class="mrel">→</span></span></span></span></span></math-inline> <strong>Unorganized (Gray)</strong> (Only via manual Reset)</p></td></tr></tbody></table><h3>2.2 User Workflow Steps</h3><table><tbody><tr><th><p>Step</p></th><th><p>Status</p></th><th><p>Required Action</p></th><th><p>Function/System Triggered</p></th></tr><tr><td><p><strong>1. Ingest</strong></p></td><td><p>⚪ Gray</p></td><td><p>User selects title to define mapping.</p></td><td><p><strong>Organization Dialog</strong> (Single) or <strong>Batch Organize Wizard</strong> (Bulk).</p></td></tr><tr><td><p><strong>2. Structure</strong></p></td><td><p>🔵 Blue</p></td><td><p>User confirms naming and structure.</p></td><td><p><code>processOrganizeAndRename()</code></p></td></tr><tr><td><p><strong>3. Finalize</strong></p></td><td><p>🟢 Green</p></td><td><p>User verifies fetched NFO/Artwork.</p></td><td><p><code>processMetadataFinalize()</code></p></td></tr><tr><td><p><strong>4. Deploy</strong></p></td><td><p>N/A</p></td><td><p>User commits to final move.</p></td><td><p><code>processMoveToLiveLibrary()</code></p></td></tr><tr><td><p><strong>5. Live</strong></p></td><td><p>N/A</p></td><td><p>Media is moved to the target library.</p></td><td><p><code>File Handler: atomicMove(source, target)</code></p></td></tr></tbody></table><h2>3. Detailed Workflow Functionality</h2><h3>3.1 Organization Dialog (Single Item Processing)</h3><p>The dialog is segmented into three vertical panels:</p><ol><li><p><strong>Source Panel:</strong> Displays the raw file/folder hierarchy. Allows toggling Raw/Clean names and moving files to <strong>Uncategorized</strong> or <strong>Quarantine</strong>.</p></li><li><p><strong>Control Panel:</strong> Houses the search bar (to map to an external database ID), Naming Template selector, and Anchoring tool.</p></li><li><p><strong>Right Panel Preview:</strong> <strong>Must be a live, non-editable render.</strong> It uses the selected <strong>Naming Template</strong> and the current <strong>Metadata ID</strong> to project the final file path and structure.</p></li></ol><p><strong>Commit Action (<code>processOrganizeAndRename</code>):</strong></p><ol><li><p>Verify the selected <strong>Naming Template</strong> is valid.</p></li><li><p>Execute file system operations (rename files, create new directory structure).</p></li><li><p>On success: <code>State Manager</code> updates status <math-inline class="math-inline math-node" title="" contenteditable="false"><span class="math-render"><span class="katex"><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height: 0.3669em;"></span><span class="mrel">→</span></span></span></span></span></math-inline> <strong>Processing (Blue)</strong>.</p></li><li><p>On failure: <code>File Handler</code> triggers a <strong>Critical Failure (Red)</strong> error mode with logging.</p></li></ol><h3>3.2 Batch Organize Wizard (Bulk Processing)</h3><p>This wizard handles multiple selected <strong>Gray</strong> items, transitioning them efficiently to the <strong>Blue</strong> state.</p><h4>3.2.1 Series Assumption Algorithm</h4><ol><li><p><strong>Fluff Cleaning:</strong> Run deep <code>Fluff Removal</code> on all selected items.</p></li><li><p><strong>Grouping:</strong> Items are grouped by high-similarity of the <strong>Clean Name</strong> (e.g., "Naruto Shippuden S03" and "Naruto Shippuden Movie" are grouped).</p></li><li><p><strong>User Confirmation Loop:</strong></p><ul><li><p><strong>Prompt 1 (Grouping):</strong> Display the raw and clean names for the assumed group. User must confirm <strong>which items belong</strong> (Individual Target Confirmation). Items deselected are queued for the next loop.</p></li><li><p><strong>Prompt 2 (Search/ID):</strong> User confirms the final series name (e.g., "Naruto Shippuden") and assigns the external ID.</p></li><li><p><strong>Layout Confirmation:</strong> A simplified <strong>Right Panel Preview</strong> shows the planned merged structure (e.g., Season 1, Season 2, Movie merged under the single ID).</p></li><li><p><strong>Status Update:</strong> Confirmed items transition to <strong>Processing (Blue)</strong>. Repeat until all selected items are processed.</p></li></ul></li></ol><h3>3.3 State-Aware Merge Logic (Critical Safety System)</h3><p>This logic prevents merging a raw (lower-state) file directly into a finalized (higher-state) structure, maintaining data integrity.</p><table><tbody><tr><th><p>Condition</p></th><th><p>Source State</p></th><th><p>Target State</p></th><th><p>Required Action Sequence</p></th></tr><tr><td><p><strong>Standard Merge</strong></p></td><td><p>🔵 Blue</p></td><td><p>🟢 Green or 🔵 Blue</p></td><td><p><code>File Handler</code>: Merge files into target structure.</p></td></tr><tr><td><p><strong>CRITICAL Merge</strong></p></td><td><p>⚪ Gray</p></td><td><p>🟢 Green or 🔵 Blue</p></td><td><p><strong>1. User Prompt:</strong> Must explicitly confirm the pre-processing. <strong>2. <code>State Manager</code>:</strong> Queues the source item for <strong>forced <code>processOrganizeAndRename()</code></strong>. <strong>3. Final Action:</strong> After successful processing to <strong>Blue</strong>, the merge is completed.</p></td></tr></tbody></table><h2>4. Advanced Subsystems Specification</h2><h3>4.1 Fluff Removal Engine</h3><ul><li><p><strong>Implementation:</strong> Must use a multi-stage approach: 1. Default system-wide Regex (pre-defined). 2. User-defined Regex patterns (customizable). 3. Manual override/whitelist (per-file exclusion).</p></li><li><p><strong>Application:</strong> Applied aggressively during the <strong>File Detection Workflow</strong> and the <strong>Batch Organize</strong> process.</p></li><li><p><strong>Validation:</strong> Must prevent accidental removal of critical identifiers (e.g., season/episode numbers, titles).</p></li></ul><h3>4.2 Media Title Anchoring System</h3><ul><li><p><strong>Implementation:</strong> The <code>Metadata Engine</code> fetches a full chronological/canonical watch order list (if available).</p></li><li><p><strong>Anchoring Data:</strong> Must rely on specific NFO tags (<code>sorttitle</code>, <code>episode</code> number) to insert movies or specials correctly into the episodic timeline.</p></li><li><p><strong>Manual Override:</strong> The <strong>Anchoring Interface</strong> must be a drag-and-drop UI that allows the user to manually adjust the order of episodes/movies/specials within the timeline, overwriting scraped anchor data.</p></li></ul><h3>4.3 Error and Transactional Rollback</h3><p>The <code>File Handler</code> must treat all structural file changes (renames, moves, folder creation) as a single transaction:</p><ol><li><p><strong>Critical Failure:</strong> If any step fails (e.g., target directory creation, file lock), the entire sequence halts.</p></li><li><p><strong>Rollback:</strong> The <code>File Handler</code> attempts to undo any successful changes made during that specific operation (e.g., deleting partially created folders, restoring original file names).</p></li><li><p><strong>Logging:</strong> Log full details to the <strong>Console Panel</strong> and set the Media Title state to <strong>Critical Error (Red)</strong>.</p></li></ol><h3>4.4 Directory Management (Safety)</h3><table><tbody><tr><th><p>Folder</p></th><th><p>Purpose</p></th><th><p>Functional Requirement</p></th></tr><tr><td><p><strong>Staging Directory</strong></p></td><td><p>Primary input/processing area.</p></td><td><p>Monitor Service runs here. All state transitions occur here.</p></td></tr><tr><td><p><strong>Uncategorized Folder</strong></p></td><td><p>User-flagged items requiring review.</p></td><td><p>Must <em>not</em> be monitored by the <code>Directory Monitor Service</code>. Only manual interaction allowed.</p></td></tr><tr><td><p><strong>Quarantine Folder</strong></p></td><td><p>Items marked for removal/deletion.</p></td><td><p>Must have a dedicated <strong>Purge</strong> function and a <strong>Restore</strong> function linked to the file's original path metadata.</p></td></tr><tr><td><p><strong>Watch Directory</strong></p></td><td><p>Automated input drop point.</p></td><td><p>Must be monitored by the <code>Directory Monitor Service</code>. All detected items are <em>moved</em>, not copied, to Staging.</p></td></tr></tbody></table><h2>5. Customization and Aesthetics Specification</h2><p>The application uses a <strong>Profile System</strong> to manage all visual elements, ensuring consistent aesthetics while allowing user preference.</p><h3>5.1 Appearance Profiles Structure</h3><p>The <code>Appearance Profiles</code> system manages two categories of settings simultaneously:</p><ol><li><p><strong>Status Visuals:</strong> Custom hex codes and icon/emoji assignments for the five core status states (Gray, Blue, Green, Yellow, Red).</p></li><li><p><strong>Application Theme:</strong> The three primary color components that define the UI: <strong>Primary Background</strong>, <strong>Text Color</strong>, and <strong>Accent Color</strong>.</p></li></ol><h3>5.2 Default Theme Specifications (Visualized)</h3><p>The application ships with three base themes, each offering a Dark Mode and a Light Mode (using muted gray backgrounds to prevent eye strain).</p><table><tbody><tr><th><p>Theme Name</p></th><th><p>Mode</p></th><th><p>Primary Background (Color &amp; Hex)</p></th><th><p>Accent Color (Color &amp; Hex)</p></th><th><p>Text Color (Color &amp; Hex)</p></th></tr><tr><td><p><strong>Jmad</strong></p></td><td><p><strong>Dark (Default)</strong></p></td><td><p>Deep Charcoal Gray (<code>#2A2A2A</code>)</p></td><td><p>Dark Greenish Gray (<code>#3d543a</code>)</p></td><td><p>Muted White (<code>#E0E0E0</code>)</p></td></tr><tr><td><p><strong>Jmad</strong></p></td><td><p><strong>Light</strong></p></td><td><p>Muted Light Gray (<code>#F0F0F0</code>)</p></td><td><p>Pale Greenish Gray (<code>#accea7</code>)</p></td><td><p>Charcoal Gray (<code>#333333</code>)</p></td></tr><tr><td><p><strong>Mike</strong></p></td><td><p><strong>Dark</strong></p></td><td><p>Deep Charcoal Gray (<code>#2A2A2A</code>)</p></td><td><p>Bright Pinkish (<code>#9a0d8f</code>)</p></td><td><p>Muted White (<code>#E0E0E0</code>)</p></td></tr><tr><td><p><strong>Mike</strong></p></td><td><p><strong>Light</strong></p></td><td><p>Muted Light Gray (<code>#F0F0F0</code>)</p></td><td><p>Soft Pastel Pink (<code>#ed83e4</code>)</p></td><td><p>Charcoal Gray (<code>#333333</code>)</p></td></tr><tr><td><p><strong>Kerberos</strong></p></td><td><p><strong>Dark</strong></p></td><td><p>Deep Charcoal Gray (<code>#2A2A2A</code>)</p></td><td><p>Nuclear Warning Orange (<code>#ff8b26</code>)</p></td><td><p>Muted White (<code>#E0E0E0</code>)</p></td></tr><tr><td><p><strong>Kerberos</strong></p></td><td><p><strong>Light</strong></p></td><td><p>Muted Light Gray (<code>#F0F0F0</code>)</p></td><td><p>Soft Pale Orange (<code>#ffa85c</code>)</p></td><td><p>Charcoal Gray (<code>#333333</code>)</p></td></tr></tbody></table><h2>6. Future Development (V2+)</h2><p>The following features are deferred and retained for the long-term roadmap:</p><ul><li><p><strong>Audio Language Sampling:</strong> Requires complex DSP/ML libraries to analyze audio tracks and identify spoken language.</p></li><li><p><strong>Post-Move Server Webhook:</strong> Integration with media server APIs (Plex/Jellyfin) to trigger a library scan automatically.</p></li><li><p><strong>Automated Media Acquisition Integration:</strong> Leveraging the <strong>Get List</strong> foundation to communicate with external tools (e.g., Radarr/Sonarr) for full lifecycle automation.</p></li><li><p><strong>User Profiles:</strong> Allowing multiple application users to save independent settings and themes.</p></li></ul></div>
+
+---
+
+# JMAD Media Tool: Developers Roadmap (Version 1)
+
+## 1. Architectural Overview & Data Flow
+
+The JMAD Media Tool operates as a persistent, single-instance application (desktop or server-side). It must manage file system paths and persistent user settings. All workflows prioritize **non-destructive, preview-first operations** and **atomic file handling**.
+
+### 1.1 Core Application Components
+
+| Component | Responsibility | Persistent Data Storage | Technical Notes |
+| :--- | :--- | :--- | :--- |
+| **Directory Monitor Service** | Persistent, low-impact background thread. Scans `Staging Path` and `Watch Directory` for changes (polling or OS events). Triggers **File Detection Workflow**. | Configuration settings (Paths, Scan Interval). | Must be highly optimized to minimize CPU/IO load. |
+| **State Manager** | Centralized authority for all Media Title statuses (Gray, Blue, Green, Error). Manages transitions, indexes media, and updates the UI. | **Media Title Index (Database/JSON):** Stores source path, target path, current state, metadata ID (TMDB/TVDB), flag data, and **original raw name**. | Central object responsible for application state. |
+| **Metadata Engine** | Handles external API calls (TMDB, TVDB) and manages the generation/reading of NFO files and artwork assets. | API Keys, Preferred Languages, Default Watch Order. | Must handle API rate limiting and return structured JSON for NFO generation. Targets media files (`.mkv`, `.mp4`) and standard image types. |
+| **File Handler** | Executes all file system commands (Rename, Move, Delete, Rollback). **Must ensure all moves/renames are atomic operations.** | Naming Templates, Fluff Regex Patterns. | Operations must be executed using **Copy-Verify-Delete Original** or equivalent OS-level atomic operation to ensure data fidelity. |
+| **Appearance Profiles** | Manages all visual settings (Themes, Status Colors, Icons). | Saved custom profiles (JSON). | Must be a reactive component for instant theme switching. |
+
+### 1.2 File Detection Workflow (Directory Monitor)
+
+1.  **Trigger:** `Directory Monitor Service` detects new/changed content in `Staging Path` or `Watch Directory`.
+2.  **Input Handling:** If content is detected in the `Watch Directory`, the `File Handler` executes an **atomic move** to the `Staging Path`.
+3.  **Initial Scan:** The `File Handler` performs a recursive scan, identifying media files and associated auxiliary files (e.g., subtitles, covers).
+4.  **Fluff Removal (Initial):** `File Handler` applies the default **Fluff Regex Patterns** to the root folder name and contained files to create a **Clean Name**. The raw original name must be preserved in the `State Manager`.
+5.  **Index/State Assignment:** A new entry is created in the `State Manager`.
+6.  **UI Update:** The new Media Title is displayed in the Staging Directory UI with the **Unorganized (Gray)** status.
+
+---
+
+## 2. Core State Management and Workflow
+
+State transitions are only triggered by explicit user interaction (`Commit Actions`) or automated post-processing routines.
+
+### 2.1 State Definitions and Transitions
+
+| State (Icon/Color) | Definition | Triggering Function | Next States |
+| :--- | :--- | :--- | :--- |
+| **⚪ Unorganized (Gray)** | Raw input. Only Fluff Removal is applied. Source/target structures are undefined. **Requires mapping to an external ID.** | `Directory Monitor` / User creates a new entry. | $\rightarrow$ **Processing (Blue)** |
+| **🔵 Processing (Blue)** | Files are mapped, structured, and named correctly, but metadata (NFO/Artwork) is absent or incomplete. | `processOrganizeAndRename()` / `processRawFile()` | $\rightarrow$ **Ready (Green)** |
+| **🟢 Ready to Move (Green)** | Complete and finalized. NFOs, artwork, and anchoring data are generated and saved internally. Safe for deployment. | `processMetadataFinalize()` | $\rightarrow$ **Live (Catalogue)** |
+| **🟡 Warning (Yellow)** | Non-critical issue (e.g., **Uncategorized** files, quality deficiency). Appears as a *secondary icon/flag* and **does not block state transition.** | `setFlag(WARNING)` | N/A (Applies to any state) |
+| **🔴 Critical Error (Red)** | Core file system operation failed (e.g., failed rollback, permissions denied). All related processes are blocked. | `setError(CRITICAL)` | $\rightarrow$ **Unorganized (Gray)** (Only via manual **Reset State** function) |
+
+### 2.2 User Workflow Steps (Triggered Functions)
+
+| Step | Status | Required Action | Function/System Triggered |
+| :--- | :--- | :--- | :--- |
+| **1. Ingest/Map** | ⚪ Gray | User maps raw content to a standard title and structure. | **Organization Dialog** or **Batch Organize Wizard** (triggers `processOrganizeAndRename()`) |
+| **2. Structure/Rename** | 🔵 Blue | System performs file/folder renaming based on the chosen template. | `processOrganizeAndRename()` |
+| **3. Finalize Metadata** | 🟢 Green | System fetches and saves NFO/Artwork. | `processMetadataFinalize()` (must use external API) |
+| **4. Deploy** | N/A | User commits to final move to a Live Library. | `processMoveToLiveLibrary()` |
+| **5. Live** | N/A | Media is moved to the target library. | `File Handler: atomicMove(source, target)` |
+
+---
+
+## 3. Detailed Workflow Functionality
+
+### 3.1 Organization Dialog (Single Item Processing UI)
+
+The dialog is segmented into three vertical panels and serves as the primary processing interface for single titles.
+
+1.  **Source Panel (Left):** Displays the raw file/folder hierarchy. Contains controls to:
+    * Toggle display between **Raw Name** and **Clean Name**.
+    * Initiate move actions to **Uncategorized** or **Quarantine** folders.
+2.  **Control Panel (Center):** Houses interactive elements:
+    * **Search Bar:** Maps the title to an external database ID (TMDB/TVDB).
+    * **Naming Template Selector:** Dropdown for selecting saved templates.
+    * **Fluff Pattern Editor Access:** Button to temporarily modify or exclude fluff patterns for the selected item.
+    * **Anchoring Tool Access:** Button to open the drag-and-drop anchoring interface (Section 4.2).
+3.  **Right Panel Preview:** **Must be a live, non-editable render.** It uses the selected **Naming Template** and the current **Metadata ID** to project the final file path and folder structure *before* commitment.
+
+**Commit Action (`processOrganizeAndRename`):** This is a single atomic execution that commits the renaming and structure creation.
+
+### 3.2 Batch Organize Wizard (Bulk Processing)
+
+This wizard handles multiple selected **Gray** items, minimizing repetitive search and mapping actions.
+
+#### 3.2.1 Series Assumption Algorithm
+
+1.  **Fluff Cleaning:** Run deep `Fluff Removal` on all selected items.
+2.  **Grouping:** Items are grouped by high-similarity of the **Clean Name**.
+3.  **User Confirmation Loop:**
+    * **Prompt 1 (Grouping):** User confirms which items (e.g., files for Season 1 and files for Season 2) belong to the assumed group. Items deselected are queued for the next loop.
+    * **Prompt 2 (Search/ID):** User confirms the final series name and assigns the external ID.
+    * **Layout Confirmation:** A simplified **Right Panel Preview** shows the planned merged structure.
+    * **Status Update:** Confirmed items transition to **Processing (Blue)**.
+
+### 3.3 State-Aware Merge Logic (Critical Safety System)
+
+This logic prevents merging lower-state content into higher-state content without required pre-processing, ensuring structural integrity.
+
+| Condition | Source State | Target State | Required Action Sequence (Pre-Processing) |
+| :--- | :--- | :--- | :--- |
+| **Standard Merge** | 🔵 Blue | 🟢 Green or 🔵 Blue | `File Handler`: Merge (copy/move) files into target structure. |
+| **CRITICAL Merge** | ⚪ Gray | 🟢 Green or 🔵 Blue | **1. User Prompt:** Must explicitly confirm the pre-processing. **2. `State Manager`:** Queues the source item for **forced `processOrganizeAndRename()`** (i.e., rename/structure creation). **3. Final Action:** After successful transition to **Blue**, the merge is completed. |
+
+---
+
+## 4. Advanced Subsystems Specification
+
+### 4.1 Fluff Removal Engine
+
+* **Implementation:** Must use a multi-stage approach: **1. Default system-wide Regex** (for standard tags like `[WEB-DL]`, `[YTS]`). **2. User-defined Regex patterns** (customizable in Settings). **3. Manual override/whitelist** (per-file exclusion).
+* **Validation:** Regex logic must be validated to prevent accidental removal of critical identifiers (e.g., season/episode numbers, custom naming identifiers).
+
+### 4.2 Media Title Anchoring System
+
+* **Implementation:** The `Metadata Engine` fetches the full chronological/canonical watch order list (if available via API).
+* **Anchoring Data:** Must rely on specific NFO tags (`sorttitle`, `episode` number) to insert movies or specials correctly into the episodic timeline.
+* **Manual Override:** The **Anchoring Interface** must be a drag-and-drop UI that allows the user to manually adjust the order, overwriting scraped anchor data.
+
+### 4.3 Error and Transactional Rollback
+
+The **Console Panel** displays all logging and error output. The `File Handler` must treat all structural file changes as a single transaction:
+
+1.  **Critical Failure:** If any step fails (e.g., target directory creation, file lock), the entire sequence halts.
+2.  **Rollback:** The `File Handler` attempts to undo any successful changes made during that specific operation (e.g., deleting partially created folders, restoring original file names).
+3.  **Logging:** Log full details to the **Console Panel** and set the Media Title state to **Critical Error (Red)**.
+
+### 4.4 Directory Management (Safety)
+
+| Folder | Purpose | Functional Requirement |
+| :--- | :--- | :--- |
+| **Staging Directory** | Primary input/processing area. | Monitor Service runs here. All state transitions occur here. |
+| **Uncategorized Folder** | User-flagged items **unsure how to process** (e.g., partial files). | Must *not* be monitored by the `Directory Monitor Service`. Only manual interaction allowed. |
+| **Quarantine Folder** | Items marked for removal/deletion (e.g., duplicates). | Must have a dedicated **Purge** function (permanent delete) and a **Restore** function linked to the file's original path metadata. |
+| **Watch Directory** | Automated input drop point (e.g., torrent client completed downloads). | Must be monitored by the `Directory Monitor Service`. All detected items are **moved**, not copied, to Staging. |
+
+### 4.5 Get List Management (V1 Foundation)
+
+This module provides the structural foundation for future automated acquisition features, acting as a persistent list of desired media.
+
+* **Persistence:** The list must be saved in the application's persistent storage.
+* **Functionality:** Allows users to manually add, view, and mark as acquired, desired Movies and TV Series.
+* **Data Fields:** Each entry must store at least: `Title`, `External ID` (optional), `Status` (Wanted, Acquired, Downloading), and `Type` (Movie/Series).
+
+---
+
+## 5. Customization and Aesthetics Specification
+
+### 5.1 Appearance Profiles Structure
+
+The `Appearance Profiles` system manages two categories of settings simultaneously: **Status Visuals** (fixed logic, customizable color/icon) and **Application Theme** (customizable background/text/accent colors).
+
+### 5.2 Default Theme Specifications (Technical)
+
+All themes use **Muted Light Gray (`#F0F0F0`)** for light modes and **Deep Charcoal Gray (`#2A2A2A`)** for dark modes to reduce eye strain.
+
+| Theme Name | Mode | Primary Background (Color & Hex) | Accent Color (Color & Hex) | Text Color (Color & Hex) |
+| :--- | :--- | :--- | :--- | :--- |
+| **Jmad** | **Dark (Default)** | Deep Charcoal Gray (`#2A2A2A`) | Dark Greenish Gray (`#3d543a`) | Muted White (`#E0E0E0`) |
+| **Jmad** | **Light** | Muted Light Gray (`#F0F0F0`) | Pale Greenish Gray (`#accea7`) | Charcoal Gray (`#333333`) |
+| **Mike** | **Dark** | Deep Charcoal Gray (`#2A2A2A`) | Bright Pinkish (`#9a0d8f`) | Muted White (`#E0E0E0`) |
+| **Mike** | **Light** | Muted Light Gray (`#F0F0F0`) | Soft Pastel Pink (`#ed83e4`) | Charcoal Gray (`#333333`) |
+| **Kerberos** | **Dark** | Deep Charcoal Gray (`#2A2A2A`) | Nuclear Warning Orange (`#ff8b26`) | Muted White (`#E0E0E0`) |
+| **Kerberos** | **Light** | Muted Light Gray (`#F0F0F0`) | Soft Pale Orange (`#ffa85c`) | Charcoal Gray (`#333333`) |
+
+---
+
+## 6. Future Development (V2+)
+
+The following features are deferred and retained for the long-term roadmap (V2 and beyond):
+
+* **Audio Language Sampling:** Advanced feature requiring complex Digital Signal Processing (DSP) or Machine Learning (ML) to analyze audio tracks and identify spoken language.
+* **Post-Move Server Webhook:** Integration with media server APIs (Plex/Jellyfin) to trigger a library scan automatically upon successful deployment.
+* **Automated Media Acquisition Integration:** Leveraging the V1 **Get List Management** foundation to communicate with external tools (e.g., Radarr/Sonarr) for full lifecycle automation.
+* **User Profiles:** Allowing multiple application users to save independent settings and UI configurations.
