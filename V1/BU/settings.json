@@ -1,0 +1,11 @@
+{
+  "tv_root": "G:/Staging/TV",
+  "episode_pattern": "{series} - S{season:02d}E{episode:02d}{ext}",
+  "theme": "darkly",
+  "staging": "G:/Staging/TV",
+  "parsing": "",
+  "live": "",
+  "rename_format": "SxxExx",
+  "show_history_by_default": true,
+  "history_undocked_by_default": false
+}

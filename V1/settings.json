@@ -1,0 +1,12 @@
+{
+  "directories": {
+    "staging": "G:/Staging/TV",
+    "tv_shows": "",
+    "movies": "",
+    "anime": ""
+  },
+  "episode_pattern": "{series} - S{season:02d}E{episode:02d}{ext}",
+  "movie_pattern": "{series} ({year}){ext}",
+  "console_visible": true,
+  "move_presets": []
+}

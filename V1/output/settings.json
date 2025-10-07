@@ -1,0 +1,5 @@
+{
+  "tv_root": "G:/Staging/TV",
+  "episode_pattern": "{series} - S{season:02d}E{episode:02d}{ext}",
+  "theme": "darkly"
+}
