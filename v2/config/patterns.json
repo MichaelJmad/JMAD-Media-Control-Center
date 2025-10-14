@@ -1,0 +1,7 @@
+{
+    "title_cleaning_patterns": [
+        "\s*\[.*?]\s*",
+        "\s*\(.*?\)\s*",
+        "\s*S\d+\s*"
+    ]
+}
