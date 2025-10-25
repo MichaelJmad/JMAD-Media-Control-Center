@@ -5,7 +5,7 @@ a = Analysis(
     ['V1\\JMADMediaManager.py'],
     pathex=[],
     binaries=[],
-    datas=[('images/JMADMMT.ico', '.'), ('images/JMADMMT.png', '.'), ('V1/patterns.json', '.'), ('V1/settings.json', '.'), ('V1/themes', 'themes')],
+    datas=[('images/JMADMMT.ico', '.'), ('images/JMADMMT.png', '.'), ('V1/themes', 'themes')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
