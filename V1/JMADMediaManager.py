@@ -2,15 +2,16 @@
 """
 JMAD Media Tool
 A robust TV series and media renamer application.
-Version: 6.3 (Move To Presets)
+Version: 6.8 (Advanced Organize Dialog)
 """
+from __future__ import annotations
 import os
 import re
 import json
 import shutil
 import sys
 import tkinter as tk
-from tkinter import messagebox, filedialog, simpledialog
+from tkinter import messagebox, filedialog, simpledialog, scrolledtext, ttk
 import ttkbootstrap as tb
 from ttkbootstrap.constants import *
 from typing import Dict, List, Optional, Tuple
@@ -20,16 +21,34 @@ from pathlib import Path
 # -------------------------
 # Configuration
 # -------------------------
+CURRENT_VERSION = "6.8"
+UPDATE_CHECK_URL = "https://api.github.com/repos/yourusername/jmad-media-tool/releases/latest"
+
 VIDEO_EXTS = {".mkv", ".mp4", ".avi", ".mov", ".m4v"}
-CLEANUP_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".txt", ".nfo", ".srt", ".mp3"}
+CLEANUP_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".txt", ".nfo", ".srt", ".mp3", ".json", ".xml"}
 SETTINGS_FILE = "settings.json"
-VALID_THEMES = ["litera", "darkly", "superhero", "cosmo", "flatly", "minty"]
+PATTERNS_FILE = "patterns.json"
+
 DEFAULT_SETTINGS = {
-    "tv_root": "",
+    "directories": {
+        "staging": "",
+        "tv_shows": "",
+        "movies": "",
+        "anime": ""
+    },
     "episode_pattern": "{series} - S{season:02d}E{episode:02d}{ext}",
-    "theme": "litera",
+    "movie_pattern": "{series} ({year}){ext}",
+    "console_visible": True,
     "move_presets": []
 }
+
+DEFAULT_FLUFF_PATTERNS = [
+    r"\[.*?\]",
+    r"\(.*?\)",
+    r"\b(1080p|720p|2160p|4k|x264|x265|h264|h265|hevc|webrip|bluray|bdrip)\b",
+    r"(s\d+)",
+]
+
 METADATA_FILENAME = ".jmad_info.json"
 MEDIA_TYPES = ["TV Series", "Anime", "Movie", "Anime Movie"]
 
@@ -60,6 +79,8 @@ class Series:
         self.has_nonstandard_folders = False
         self.is_processed = False
         self.media_type = "TV Series"
+        self.cover_art_path: Optional[str] = None
+        self.year: Optional[int] = None
 
     def get_all_episodes(self) -> List[Episode]:
         all_episodes = []
@@ -75,15 +96,17 @@ class BatchAction:
         self.metadata_path: Optional[str] = None
 
 class HistoryManager:
-    def __init__(self):
+    def __init__(self, console_logger):
         self.history_log: List[Tuple[BatchAction, str]] = []
         self.current_pos: int = -1
+        self.log = console_logger
 
     def push(self, action: BatchAction):
         if self.current_pos < len(self.history_log) - 1:
             self.history_log = self.history_log[: self.current_pos + 1]
         self.history_log.append((action, "new"))
         self.current_pos += 1
+        self.log(f"Action: {action.description}")
 
     def can_undo(self) -> bool:
         return self.current_pos >= 0
@@ -122,6 +145,7 @@ class HistoryManager:
     def undo(self, stop_at: Optional[str] = None) -> Tuple[List[str], Optional[BatchAction]]:
         if not self.can_undo(): return [], None
         action, _ = self.history_log[self.current_pos]
+        self.log(f"Undoing: {action.description}")
 
         dirs_to_prune = set()
         stop_at_path_abs = os.path.abspath(stop_at) if stop_at else None
@@ -157,14 +181,16 @@ class HistoryManager:
             
             self.history_log[self.current_pos] = (action, "undone")
             self.current_pos -= 1
-        
-        return failures, action
+        else:
+            self.log(f"Undo failed for: {action.description}")
 
+        return failures, action
 
     def redo(self, stop_at: Optional[str] = None) -> Tuple[List[str], Optional[BatchAction]]:
         if not self.can_redo(): return [], None
         self.current_pos += 1
         action, _ = self.history_log[self.current_pos]
+        self.log(f"Redoing: {action.description}")
         
         original_src_dirs = {os.path.dirname(src) for src, _ in action.moves}
 
@@ -175,12 +201,14 @@ class HistoryManager:
                 prune_empty_dirs(d, stop_at=stop_at)
             self.history_log[self.current_pos] = (action, "redone")
         else:
+            self.log(f"Redo failed for: {action.description}")
             self.current_pos -= 1
         return failures, action
         
     def clear(self):
         self.history_log.clear()
         self.current_pos = -1
+        self.log("History cleared.")
 
 # -------------------------
 # Utility Functions
@@ -201,6 +229,24 @@ def save_settings(settings: dict):
     except Exception as e:
         messagebox.showwarning("Settings Error", f"Failed to save settings: {e}")
 
+def load_patterns() -> List[str]:
+    if not os.path.exists(PATTERNS_FILE):
+        save_patterns(DEFAULT_FLUFF_PATTERNS)
+        return DEFAULT_FLUFF_PATTERNS
+    try:
+        with open(PATTERNS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return DEFAULT_FLUFF_PATTERNS
+
+def save_patterns(patterns: List[str]):
+    try:
+        with open(PATTERNS_FILE, "w", encoding="utf-8") as f:
+            json.dump(patterns, f, indent=2)
+    except Exception as e:
+        messagebox.showwarning("Patterns Error", f"Failed to save patterns: {e}")
+
+
 def prune_empty_dirs(path: str, stop_at: Optional[str] = None):
     try:
         path = os.path.abspath(path)
@@ -217,6 +263,11 @@ def prune_empty_dirs(path: str, stop_at: Optional[str] = None):
             os.rmdir(path)
             path = parent
     except (OSError, PermissionError, FileNotFoundError): pass
+    
+def create_portable_dirs():
+    for dirname in ["database", "logs", "themes"]:
+        if not os.path.isdir(dirname):
+            os.makedirs(dirname)
 
 # -------------------------
 # Filename Parsing & Scanning
@@ -234,17 +285,14 @@ EPISODE_PATTERNS = [
     re.compile(r"[._\-\s](?<!\d)(\d{2})(?!\d)[._\-\s]?", re.I),
 ]
 
-FLUFF_PATTERNS = [
-    r"\[.*?\]",
-    r"\(.*?\)",
-    r"\b(1080p|720p|2160p|4k|x264|x265|h264|h265|hevc|webrip|bluray|bdrip)\b",
-    r"(s\d+)",
-]
-
-def suggest_series_name(original_name: str) -> str:
+def suggest_series_name(original_name: str, fluff_patterns: List[str]) -> str:
     name = original_name
-    for pat in FLUFF_PATTERNS:
-        name = re.sub(pat, "", name, flags=re.I)
+    for pat in fluff_patterns:
+        try:
+            name = re.sub(pat, "", name, flags=re.I)
+        except re.error:
+            # Ignore invalid patterns from user settings
+            pass
     name = re.sub(r"[._]", " ", name)
     return " ".join(name.split()).strip()
 
@@ -278,207 +326,90 @@ def predict_new_filename(ep: Episode, settings: dict) -> Optional[str]:
 def scan_tv_root(tv_root: str) -> Dict[str, Series]:
     series_map: Dict[str, Series] = {}
     if not tv_root or not os.path.isdir(tv_root): return series_map
-    for entry in os.scandir(tv_root):
-        if not entry.is_dir(): continue
-        series = Series(entry.name)
-        
-        metadata_path = os.path.join(entry.path, METADATA_FILENAME)
-        if os.path.exists(metadata_path):
-            try:
-                with open(metadata_path, 'r', encoding='utf-8') as f:
-                    metadata = json.load(f)
-                    series.is_processed = metadata.get('is_processed', False)
-                    series.media_type = metadata.get('media_type', 'TV Series')
-            except (json.JSONDecodeError, IOError): pass
-
-        all_episodes_temp = []
-        series_root_path_abs = os.path.abspath(entry.path)
-        
-        for root, _, files in os.walk(series_root_path_abs):
-            season_hint = None
-            if not os.path.samefile(root, series_root_path_abs):
-                folder_name = os.path.basename(root)
-                m = SEASON_HINT_RE.search(folder_name)
-                if m:
-                    groups = m.groups()
-                    if groups[0]: season_hint = int(groups[0])
-                    elif groups[1]: season_hint = int(groups[1])
-                elif re.search(r"specials", folder_name, re.I):
-                    season_hint = 0
-                elif re.search(r"movies", folder_name, re.I):
-                    season_hint = -1 # Special key for movies
+    
+    try:
+        for entry in os.scandir(tv_root):
+            if not entry.is_dir(): continue
+            series = Series(entry.name)
             
-            for f in files:
-                if os.path.splitext(f)[1].lower() in VIDEO_EXTS:
-                    ep = Episode(os.path.join(root, f), season=season_hint)
-                    ep.series_name = series.name
-                    _, parsed_episode = parse_episode_info(f)
-                    ep.parsed_episode_num = parsed_episode
-                    all_episodes_temp.append(ep)
+            metadata_path = os.path.join(entry.path, METADATA_FILENAME)
+            if os.path.exists(metadata_path):
+                try:
+                    with open(metadata_path, 'r', encoding='utf-8') as f:
+                        metadata = json.load(f)
+                        series.is_processed = metadata.get('is_processed', False)
+                        series.media_type = metadata.get('media_type', 'TV Series')
+                except (json.JSONDecodeError, IOError): pass
 
-        if not all_episodes_temp:
-            continue
+            all_episodes_temp = []
+            series_root_path_abs = os.path.abspath(entry.path)
+            
+            for root, _, files in os.walk(series_root_path_abs):
+                season_hint = None
+                if not os.path.samefile(root, series_root_path_abs):
+                    folder_name = os.path.basename(root)
+                    m = SEASON_HINT_RE.search(folder_name)
+                    if m:
+                        groups = m.groups()
+                        if groups[0]: season_hint = int(groups[0])
+                        elif groups[1]: season_hint = int(groups[1])
+                    elif re.search(r"specials", folder_name, re.I):
+                        season_hint = 0
+                    elif re.search(r"movies", folder_name, re.I):
+                        season_hint = -1 # Special key for movies
+                
+                for f in files:
+                    if os.path.splitext(f)[1].lower() in VIDEO_EXTS:
+                        ep = Episode(os.path.join(root, f), season=season_hint)
+                        ep.series_name = series.name
+                        _, parsed_episode = parse_episode_info(f)
+                        ep.parsed_episode_num = parsed_episode
+                        all_episodes_temp.append(ep)
 
-        has_season_folders = False
-        is_disorganized = False
+            if not all_episodes_temp:
+                continue
 
-        for ep in all_episodes_temp:
-            if ep.season is not None:
-                if ep.season >= 0: # Seasons and Specials
-                    has_season_folders = True
-                series.seasons.setdefault(ep.season, Season(ep.season)).episodes.append(ep)
-            else:
-                series.unsorted.append(ep)
-        
-        if series.unsorted:
-            if has_season_folders:
-                is_disorganized = True
-            else:
-                for ep in series.unsorted:
-                    ep_dir_abs = os.path.abspath(os.path.dirname(ep.path))
-                    if not os.path.samefile(ep_dir_abs, series_root_path_abs):
-                        is_disorganized = True
-                        break
-        
-        if series.media_type == "Movie" and is_disorganized:
-            is_disorganized = False # Movies with subfolders are fine
+            has_season_folders = False
+            is_disorganized = False
 
-        series.has_nonstandard_folders = is_disorganized
-        series_map[entry.name] = series
+            for ep in all_episodes_temp:
+                if ep.season is not None:
+                    if ep.season >= 0: # Seasons and Specials
+                        has_season_folders = True
+                    series.seasons.setdefault(ep.season, Season(ep.season)).episodes.append(ep)
+                else:
+                    series.unsorted.append(ep)
+            
+            if series.unsorted:
+                if has_season_folders:
+                    is_disorganized = True
+                else:
+                    for ep in series.unsorted:
+                        ep_dir_abs = os.path.abspath(os.path.dirname(ep.path))
+                        if not os.path.samefile(ep_dir_abs, series_root_path_abs):
+                            is_disorganized = True
+                            break
+            
+            if series.media_type == "Movie" and is_disorganized:
+                is_disorganized = False # Movies with subfolders are fine
 
-    for s in series_map.values():
-        for sec in s.seasons.values():
-            sec.episodes.sort(key=lambda e: (e.parsed_episode_num or float('inf'), e.path.lower()))
-        s.unsorted.sort(key=lambda e: e.path.lower())
+            series.has_nonstandard_folders = is_disorganized
+            series_map[entry.name] = series
+
+        for s in series_map.values():
+            for sec in s.seasons.values():
+                sec.episodes.sort(key=lambda e: (e.parsed_episode_num or float('inf'), e.path.lower()))
+            s.unsorted.sort(key=lambda e: e.path.lower())
+    except Exception as e:
+        print(f"Error scanning TV root: {e}")
+    
     return series_map
 
 
 # -------------------------
 # UI Panels
 # -------------------------
-class PreviewPanel(tb.Frame):
-    def __init__(self, parent, app_controller, settings: dict, history: 'HistoryManager'):
-        super().__init__(parent)
-        self.app = app_controller
-        self.settings = settings
-        self.history = history
-        self._row_to_episode: Dict[str, Episode] = {}
-        self._build_ui()
-
-    def _build_ui(self):
-        self.columnconfigure(0, weight=1)
-        self.rowconfigure(1, weight=1)
-
-        tb.Label(self, text="Preview", bootstyle="inverse-primary", padding=5, anchor="center").grid(row=0, column=0, sticky="ew")
-        tree_frame = tb.Frame(self)
-        tree_frame.grid(row=1, column=0, sticky="nsew", padx=6, pady=6)
-        
-        tree_frame.columnconfigure(0, weight=1)
-        tree_frame.rowconfigure(0, weight=1)
-        
-        self.tree = tb.Treeview(tree_frame, columns=("current", "new"), show="headings", selectmode="extended")
-        self.tree.grid(row=0, column=0, sticky="nsew")
-        vsb = tb.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview, bootstyle="primary-round")
-        vsb.grid(row=0, column=1, sticky="ns")
-        self.tree.configure(yscrollcommand=vsb.set)
-
-        self.tree.heading("current", text="Current Name")
-        self.tree.heading("new", text="New Name")
-        self.tree.column("current", anchor="w", width=350, stretch=True)
-        self.tree.column("new", anchor="w", width=250, stretch=True)
-
-        self.tree.tag_configure('conflict', foreground='red')
-        self.tree.bind("<Motion>", self._on_motion)
-        self.tree.bind("<Leave>", self.app.hide_tooltip)
-        self.tree.bind("<Double-Button-3>", self._on_double_right_click)
-        
-        self.btn_apply = tb.Button(self, text="Rename", command=self._apply_renames, bootstyle="outline-success")
-        self.btn_apply.grid(row=2, column=0, sticky="ew", padx=6, pady=(0, 6))
-
-    def set_items(self, episodes: List[Episode]):
-        self.tree.delete(*self.tree.get_children())
-        self._row_to_episode.clear()
-        for ep in episodes:
-            base_no_ext, _ = os.path.splitext(ep.basename())
-            current_display = f"[S{ep.season:02d}] {base_no_ext}" if ep.season is not None else base_no_ext
-            
-            pred_full = predict_new_filename(ep, self.settings)
-            pred_display = os.path.splitext(pred_full)[0] if pred_full else "(Cannot determine new name)"
-
-            row_id = self.tree.insert("", "end", values=(current_display, pred_display))
-            self._row_to_episode[row_id] = ep
-        self._check_rename_conflicts()
-
-    def _check_rename_conflicts(self):
-        all_new_names = [self.tree.set(row_id, "new") for row_id in self.tree.get_children()]
-        counts = Counter(all_new_names)
-        conflicts = {name for name, count in counts.items() if count > 1 and name != "(Cannot determine new name)"}
-        has_conflicts = False
-        for row_id in self.tree.get_children():
-            name = self.tree.set(row_id, "new")
-            if name in conflicts:
-                self.tree.item(row_id, tags=('conflict',))
-                has_conflicts = True
-            else:
-                self.tree.item(row_id, tags=())
-        self.btn_apply.config(state="disabled" if has_conflicts else "normal")
-
-    def _apply_renames(self):
-        if 'disabled' in self.btn_apply.state():
-            messagebox.showerror("Conflicts Found", "Please resolve all filename conflicts (marked in red) before applying.")
-            return
-        moves = []
-        series_name_for_action = ""
-        for row_id, ep in self._row_to_episode.items():
-            if not series_name_for_action: series_name_for_action = ep.series_name
-            new_name_no_ext = self.tree.set(row_id, "new")
-            _, ext = os.path.splitext(ep.path)
-            new_name = new_name_no_ext + ext
-            
-            if new_name and new_name != "(Cannot determine new name)" and new_name != ep.basename():
-                dst = os.path.join(os.path.dirname(ep.path), new_name)
-                moves.append((ep.path, dst))
-        if not moves: return
-        if not messagebox.askyesno("Confirm Rename", f"Rename {len(moves)} file(s)?"): return
-        
-        action = BatchAction(f"Rename {len(moves)} files for {series_name_for_action}", moves)
-        failures = self.app.history.execute_action(action, stop_at=self.app.settings.get("tv_root"))
-        
-        if failures: 
-            messagebox.showerror("Rename Error", "Some files failed to rename:\n\n" + "\n".join(failures))
-        
-        self.app.scan_root()
-        self.app.history_panel.refresh(self.app.history)
-
-
-    def _on_double_right_click(self, event):
-        row_id = self.tree.identify_row(event.y)
-        if not row_id or self.tree.identify_column(event.x) != "#2": return
-        x, y, w, h = self.tree.bbox(row_id, column="new")
-        entry = tb.Entry(self.tree, bootstyle="warning")
-        entry.place(x=x, y=y, width=w, height=h)
-        entry.insert(0, self.tree.set(row_id, "new"))
-        entry.focus()
-        def save(e):
-            ep = self._row_to_episode[row_id]
-            new_name_no_ext = entry.get().strip()
-            ep.override_new_name = new_name_no_ext + os.path.splitext(ep.path)[1]
-            self.tree.set(row_id, "new", new_name_no_ext)
-            entry.destroy()
-            self._check_rename_conflicts()
-        entry.bind("<Return>", save)
-        entry.bind("<FocusOut>", save)
-
-    def _on_motion(self, event):
-        row = self.tree.identify_row(event.y)
-        col = self.tree.identify_column(event.x)
-        if row and col in ("#1", "#2"):
-            text = self.tree.set(row, col)
-            self.app.show_tooltip(text, event.x_root, event.y_root)
-        else:
-            self.app.hide_tooltip()
-
-class HistoryPanel(tb.Frame):
+class InfoPreviewPanel(tb.Frame):
     def __init__(self, parent, app_controller):
         super().__init__(parent)
         self.app = app_controller
@@ -487,39 +418,147 @@ class HistoryPanel(tb.Frame):
     def _build_ui(self):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
-        tb.Label(self, text="History", bootstyle="inverse-primary", padding=5, anchor="center").grid(row=0, column=0, sticky="ew")
-        list_frame = tb.Frame(self)
-        list_frame.grid(row=1, column=0, sticky="nsew", padx=6, pady=6)
-        list_frame.columnconfigure(0, weight=1)
-        list_frame.rowconfigure(0, weight=1)
-        self.listbox = tk.Listbox(list_frame, activestyle="none")
-        self.listbox.grid(row=0, column=0, sticky="nsew")
-        vsb = tb.Scrollbar(list_frame, orient="vertical", command=self.listbox.yview, bootstyle="primary-round")
-        vsb.grid(row=0, column=1, sticky="ns")
-        self.listbox.configure(yscrollcommand=vsb.set)
-        btn_frame = tb.Frame(self)
-        btn_frame.grid(row=2, column=0, sticky="ew", padx=6, pady=(0,6))
-        tb.Button(btn_frame, text="Undo", command=self.app.undo_action, bootstyle="outline-warning").pack(side="left")
-        tb.Button(btn_frame, text="Redo", command=self.app.redo_action, bootstyle="outline-info").pack(side="left", padx=6)
-        tb.Button(btn_frame, text="Clear", command=self.app.clear_history, bootstyle="outline-danger").pack(side="right")
+        tb.Label(self, text="Preview", bootstyle="inverse-primary", padding=5, anchor="center").grid(row=0, column=0, sticky="ew")
 
-    def refresh(self, history_manager: HistoryManager):
-        self.listbox.delete(0, tk.END)
-        for i, (action, status) in enumerate(history_manager.history_log):
-            prefix = {"undone": "[UNDO] ", "redone": "[REDO] "}.get(status, "")
-            self.listbox.insert(tk.END, f"{prefix}{action.description}")
-            if status == "undone": self.listbox.itemconfig(i, {'fg': 'grey'})
-        if history_manager.can_undo():
-            self.listbox.selection_set(history_manager.current_pos)
-            self.listbox.see(history_manager.current_pos)
+        content_frame = tb.Frame(self, padding=10)
+        content_frame.grid(row=1, column=0, sticky="nsew")
+        content_frame.columnconfigure(1, weight=1)
 
+        self.cover_label = tb.Label(content_frame, text="Cover Art Placeholder", anchor="center")
+        self.cover_label.grid(row=0, column=0, padx=10, pady=10, sticky="nw")
+        
+        meta_frame = tb.Frame(content_frame)
+        meta_frame.grid(row=0, column=1, sticky="new")
+        meta_frame.columnconfigure(0, weight=1)
+
+        self.title_label = tb.Label(meta_frame, text="Select a Series", font=("Helvetica", 16, "bold"))
+        self.title_label.pack(fill="x", pady=(0,5))
+        
+        self.status_label = tb.Label(meta_frame, text="Status: N/A")
+        self.status_label.pack(fill="x", pady=2)
+
+        self.episodes_label = tb.Label(meta_frame, text="Episodes/Movies: N/A")
+        self.episodes_label.pack(fill="x", pady=2)
+    
+    def update_info(self, series: Optional[Series]):
+        if not series:
+            self.title_label.config(text="Select a Series")
+            self.status_label.config(text="Status: N/A")
+            self.episodes_label.config(text="Episodes/Movies: N/A")
+            return
+
+        self.title_label.config(text=series.name)
+        status = "Processed" if series.is_processed else "Not Processed"
+        self.status_label.config(text=f"Status: {status} ({series.media_type})")
+        
+        episode_count = len(series.get_all_episodes())
+        self.episodes_label.config(text=f"Files Found: {episode_count}")
+
+class ConsolePanel(tb.Frame):
+    def __init__(self, parent, app_controller, initial_content=""):
+        super().__init__(parent)
+        self.app = app_controller
+        self.docked = True
+        self.undocked_window = None
+        self.original_parent = parent
+        self._content_buffer = initial_content
+
+        self._build_ui()
+        self.last_geometry = "600x400"
+        
+        if self._content_buffer:
+            self._refresh_display()
+
+    def _build_ui(self):
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(1, weight=1)
+        
+        self.header = tb.Frame(self)
+        self.header.grid(row=0, column=0, sticky="ew")
+        self.header.columnconfigure(0, weight=1)
+
+        tb.Label(self.header, text="Console", bootstyle="inverse-primary", padding=5).grid(row=0, column=0, sticky="ew")
+        
+        self.hide_btn = tb.Button(self.header, text="Hide", command=self.app.toggle_console, bootstyle="toolbutton")
+        self.hide_btn.grid(row=0, column=1, padx=2)
+
+        self.text_frame = tb.Frame(self)
+        self.text_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
+        self.text_frame.columnconfigure(0, weight=1)
+        self.text_frame.rowconfigure(0, weight=1)
+
+        self.scrolled_text = scrolledtext.ScrolledText(self.text_frame, wrap=tk.WORD, state="disabled")
+        self.scrolled_text.grid(row=0, column=0, sticky="nsew")
+        
+        self.footer = tb.Frame(self)
+        self.footer.grid(row=2, column=0, sticky="ew", padx=5, pady=(0,5))
+        
+        self.dock_btn = tb.Button(self.footer, text="Undock", command=self.toggle_dock, bootstyle="outline-secondary")
+        self.dock_btn.pack(side="left")
+        
+        tb.Button(self.footer, text="Clear", command=self.clear, bootstyle="outline-danger").pack(side="right")
+
+    def log(self, message):
+        self._content_buffer += message + "\n"
+        self.scrolled_text.config(state="normal")
+        self.scrolled_text.insert(tk.END, message + "\n")
+        self.scrolled_text.config(state="disabled")
+        self.scrolled_text.see(tk.END)
+
+    def clear(self):
+        self._content_buffer = ""
+        self.scrolled_text.config(state="normal")
+        self.scrolled_text.delete(1.0, tk.END)
+        self.scrolled_text.config(state="disabled")
+        self.log("Console cleared.")
+    
+    def _refresh_display(self):
+        self.scrolled_text.config(state="normal")
+        self.scrolled_text.delete(1.0, tk.END)
+        self.scrolled_text.insert(1.0, self._content_buffer)
+        self.scrolled_text.config(state="disabled")
+        self.scrolled_text.see(tk.END)
+    
+    def get_content(self):
+        return self._content_buffer
+    
+    def toggle_dock(self):
+        if self.docked:
+            content = self.get_content()
+            self.undocked_window = tk.Toplevel(self.app)
+            self.undocked_window.title("JMAD Media Tool - Console")
+            self.undocked_window.geometry("600x400")
+            self.undocked_window.configure(bg=self.app.style.colors.bg)
+            
+            new_console = ConsolePanel(self.undocked_window, self.app, content)
+            new_console.pack(fill="both", expand=True, padx=5, pady=5)
+            new_console.docked = False
+            new_console.dock_btn.config(text="Dock")
+            new_console.undocked_window = self.undocked_window
+            new_console.original_parent = self.original_parent
+            
+            self.app.console = new_console
+            self.destroy()
+            self.undocked_window.protocol("WM_DELETE_WINDOW", new_console.toggle_dock)
+            self.app._update_layout_after_console_change()
+        else:
+            if self.undocked_window:
+                content = self.get_content()
+                new_console = ConsolePanel(self.original_parent, self.app, content)
+                new_console.pack(fill="both", expand=True)
+                new_console.docked = True
+                new_console.dock_btn.config(text="Undock")
+                
+                self.app.console = new_console
+                self.undocked_window.destroy()
+                self.app._update_layout_after_console_change()              
 # -------------------------
 # Main Application Window
 # -------------------------
-class JMADMediaTool(tb.Window):
-    def __init__(self, settings: dict):
-        theme = settings.get("theme", "darkly")
-        super().__init__(themename=theme)
+class JMADMediaTool(tk.Tk):
+    def __init__(self, settings: dict, patterns: List[str]):
+        super().__init__()
+        self.style = tb.Style(theme="darkly")
         self.title("JMAD Media Tool")
         self.geometry("1400x800")
 
@@ -536,11 +575,18 @@ class JMADMediaTool(tb.Window):
                 print(f"Could not set icon: {e}")
 
         self.settings = settings
-        self.history = HistoryManager()
+        self.fluff_patterns = patterns
         self.series_map: Dict[str, Series] = {}
         self._tooltip_win: Optional[tk.Toplevel] = None
         self._build_ui()
-        self.after(100, self.scan_root)
+        self.history = HistoryManager(self.console.log)
+        self.after(100, self.post_init_tasks)
+
+    def post_init_tasks(self):
+        create_portable_dirs()
+        self.scan_root()
+        # self.check_for_updates_simulated()
+        self._update_layout_after_console_change()
 
     def _build_ui(self):
         self.columnconfigure(0, weight=1)
@@ -549,27 +595,30 @@ class JMADMediaTool(tb.Window):
         toolbar = tb.Frame(self)
         toolbar.grid(row=0, column=0, sticky="ew", padx=6, pady=6)
         
-        tb.Button(toolbar, text="Scan Root", command=self.scan_root, bootstyle="outline-success").pack(side="left", padx=4)
+        tb.Button(toolbar, text="Scan", command=self.scan_root, bootstyle="outline-success").pack(side="left", padx=4)
         tb.Button(toolbar, text="Settings", command=self.open_settings, bootstyle="outline-light").pack(side="left", padx=4)
         
         self.tools_menubutton = tb.Menubutton(toolbar, text="Tools", bootstyle="outline-info")
         self.tools_menubutton.pack(side="left", padx=4)
         self._build_tools_menu()
+        
+        tb.Button(toolbar, text="Catalog", state="disabled").pack(side="left", padx=4)
 
-        tb.Button(toolbar, text="Exit", command=self.destroy, bootstyle="outline-danger").pack(side="right", padx=4)
+        tb.Button(toolbar, text="Redo", command=self.redo_action, bootstyle="outline-info").pack(side="right", padx=4)
+        tb.Button(toolbar, text="Undo", command=self.undo_action, bootstyle="outline-warning").pack(side="right")
         
-        paned = tb.PanedWindow(self, orient="horizontal", bootstyle="primary")
-        paned.grid(row=1, column=0, sticky="nsew", padx=6, pady=(0, 6))
+        main_paned = tb.PanedWindow(self, orient="horizontal", bootstyle="primary")
+        main_paned.grid(row=1, column=0, sticky="nsew", padx=6, pady=(0, 6))
         
-        left_frame = tb.Frame(paned)
+        left_frame = tb.Frame(main_paned)
         left_frame.columnconfigure(0, weight=1)
         left_frame.rowconfigure(1, weight=1)
         
         header_frame = tb.Frame(left_frame)
         header_frame.grid(row=0, column=0, sticky="ew")
         header_frame.columnconfigure(0, weight=1)
-        tb.Label(header_frame, text="Series/Season", bootstyle="inverse-primary", padding=5).grid(row=0, column=0, sticky="ew")
-        tb.Label(header_frame, text="Processed / Type", bootstyle="inverse-primary", padding=5).grid(row=0, column=1, sticky="ew")
+        tb.Label(header_frame, text="Media Tree", bootstyle="inverse-primary", padding=5).grid(row=0, column=0, sticky="ew")
+        tb.Label(header_frame, text="[Processed] [Type]", bootstyle="inverse-primary", padding=5, anchor="e").grid(row=0, column=1, sticky="ew")
 
         tree_container = tb.Frame(left_frame)
         tree_container.grid(row=1, column=0, sticky='nsew', padx=6, pady=6)
@@ -591,15 +640,42 @@ class JMADMediaTool(tb.Window):
         self.series_tree.configure(yscrollcommand=vsb_left.set)
         self.series_tree.bind("<<TreeviewSelect>>", self.on_series_selection)
         self.series_tree.bind("<Button-3>", self.on_series_right_click)
-        paned.add(left_frame, weight=2)
+        self.series_tree.bind("<Control-a>", self._select_all)
+        main_paned.add(left_frame, weight=2)
         
-        right_paned = tb.PanedWindow(paned, orient="vertical", bootstyle="primary")
-        self.preview_panel = PreviewPanel(right_paned, self, self.settings, self.history)
-        self.history_panel = HistoryPanel(right_paned, self)
-        right_paned.add(self.preview_panel, weight=3)
-        right_paned.add(self.history_panel, weight=1)
-        paned.add(right_paned, weight=3)
+        self.right_frame = tb.Frame(main_paned)
+        self.right_frame.columnconfigure(0, weight=1)
+        self.right_frame.rowconfigure(0, weight=1)
+        
+        self.right_paned = tb.PanedWindow(self.right_frame, orient="vertical", bootstyle="primary")
+        self.right_paned.grid(row=0, column=0, sticky="nsew")
+        
+        self.info_container = tb.Frame(self.right_paned)
+        self.console_container = tb.Frame(self.right_paned)
+        
+        self.info_panel = InfoPreviewPanel(self.info_container, self)
+        self.info_panel.pack(fill="both", expand=True)
+        
+        self.console = ConsolePanel(self.console_container, self)
+        self.console.pack(fill="both", expand=True)
+        
+        self.right_paned.add(self.info_container, weight=3)
+        self.right_paned.add(self.console_container, weight=1)
+        
+        main_paned.add(self.right_frame, weight=3)
+        
+    def _update_layout_after_console_change(self):
+        current_panes = self.right_paned.panes()
+        is_console_pane_visible = str(self.console_container) in current_panes
+        should_be_visible = self.console.docked and self.settings.get("console_visible", True)
 
+        if should_be_visible and not is_console_pane_visible:
+            self.right_paned.add(self.console_container, weight=1)
+        elif not should_be_visible and is_console_pane_visible:
+            self.right_paned.remove(self.console_container)
+        
+        self.update_idletasks()
+        
     def _build_tools_menu(self):
         tools_menu = tk.Menu(self.tools_menubutton, tearoff=0)
         tools_menu.add_command(label="Clean Files...", command=self.clean_files_tool)
@@ -607,6 +683,10 @@ class JMADMediaTool(tb.Window):
         move_menu = tk.Menu(tools_menu, tearoff=0)
         self._populate_move_menu(move_menu)
         tools_menu.add_cascade(label="Move Selected To...", menu=move_menu)
+        
+        tools_menu.add_separator()
+        console_text = "Show Console" if not self.settings.get("console_visible", True) else "Hide Console"
+        tools_menu.add_command(label=console_text, command=self.toggle_console)
 
         self.tools_menubutton["menu"] = tools_menu
 
@@ -620,17 +700,17 @@ class JMADMediaTool(tb.Window):
         
         menu.add_command(label="Choose Location...", command=self.move_series_tool)
 
-
     def scan_root(self):
-        tv_root = self.settings.get("tv_root")
-        if not tv_root or not os.path.isdir(tv_root):
+        staging_dir = self.settings.get("directories", {}).get("staging")
+        if not staging_dir or not os.path.isdir(staging_dir):
             if not self.winfo_viewable(): return
-            messagebox.showwarning("TV Root Not Set", "Please configure a valid TV Root in Settings.")
+            messagebox.showwarning("Staging Directory Not Set", "Please configure a valid Staging directory in Settings.")
             return
-        self.series_map = scan_tv_root(tv_root)
+        self.log(f"Scanning directory: {staging_dir}")
+        self.series_map = scan_tv_root(staging_dir)
         self.populate_series_tree()
-        self.preview_panel.set_items([])
-        self.history_panel.refresh(self.history)
+        self.info_panel.update_info(None)
+        self.log(f"Scan complete. Found {len(self.series_map)} series.")
 
     def populate_series_tree(self):
         self.series_tree.delete(*self.series_tree.get_children())
@@ -653,28 +733,17 @@ class JMADMediaTool(tb.Window):
                 self.series_tree.insert(top_id, "end", text="Unsorted")
 
     def on_series_selection(self, event=None):
-        episodes: List[Episode] = []
-        for item in self.series_tree.selection():
-            parent_id = self.series_tree.parent(item)
-            series_name = self.series_tree.item(parent_id or item, "text")
-            series = self.series_map.get(series_name)
-            if not series: continue
-            if not parent_id:
-                episodes.extend(series.get_all_episodes())
-            else:
-                node_text = self.series_tree.item(item, "text")
-                if node_text == "Unsorted":
-                    episodes.extend(series.unsorted)
-                else:
-                    try:
-                        if node_text == "Movies": season_key = -1
-                        elif node_text == "Specials": season_key = 0
-                        else: season_key = int(re.findall(r'\d+', node_text)[0])
-                        
-                        if season_key in series.seasons:
-                            episodes.extend(series.seasons[season_key].episodes)
-                    except (IndexError, ValueError): pass
-        self.preview_panel.set_items(episodes)
+        selection = self.series_tree.selection()
+        if not selection:
+            self.info_panel.update_info(None)
+            return
+
+        item_id = selection[0]
+        parent_id = self.series_tree.parent(item_id)
+        series_name = self.series_tree.item(parent_id or item_id, "text")
+        series = self.series_map.get(series_name)
+        
+        self.info_panel.update_info(series)
 
     def on_series_right_click(self, event):
         item_id = self.series_tree.identify_row(event.y)
@@ -695,6 +764,9 @@ class JMADMediaTool(tb.Window):
              menu.add_cascade(label="Set Type As", menu=type_menu)
              
              menu.add_separator()
+             console_text = "Show Console" if not self.settings.get("console_visible", True) else "Hide Console"
+             menu.add_command(label=console_text, command=self.toggle_console)
+             menu.add_separator()
              
              tools_menu = tk.Menu(menu, tearoff=0)
              tools_menu.add_command(label="Clean Files...", command=self.clean_files_tool)
@@ -705,12 +777,11 @@ class JMADMediaTool(tb.Window):
 
              menu.add_cascade(label="Tools", menu=tools_menu)
 
-
         if menu.index('end') is not None:
             menu.post(event.x_root, event.y_root)
             
     def set_series_type(self, item_ids: List[str], media_type: str):
-        tv_root = self.settings.get("tv_root")
+        tv_root = self.settings.get("directories", {}).get("staging")
         if not tv_root: return
 
         series_to_process = [self.series_map[self.series_tree.item(item_id, "text")] for item_id in item_ids]
@@ -729,32 +800,30 @@ class JMADMediaTool(tb.Window):
                 if not os.path.isdir(series_path): os.makedirs(series_path, exist_ok=True)
                 with open(os.path.join(series_path, METADATA_FILENAME), 'w', encoding='utf-8') as f:
                     json.dump(metadata, f, indent=2)
+                self.log(f"Set type for '{series.name}' to '{media_type}'")
             except Exception as e:
-                messagebox.showerror("Metadata Error", f"Could not save metadata for {series.name}:\n{e}")
+                self.log(f"Error setting type for '{series.name}': {e}")
         
         self.scan_root()
 
-
     def undo_action(self):
         if not self.history.can_undo(): return
-        failures, _ = self.history.undo(stop_at=self.settings.get("tv_root"))
+        failures, _ = self.history.undo(stop_at=self.settings.get("directories", {}).get("staging"))
         if failures: messagebox.showwarning("Undo Failed", "\n".join(failures))
         self.scan_root()
-        self.history_panel.refresh(self.history)
-
 
     def redo_action(self):
         if not self.history.can_redo(): return
-        failures, _ = self.history.redo(stop_at=self.settings.get("tv_root"))
+        failures, _ = self.history.redo(stop_at=self.settings.get("directories", {}).get("staging"))
         if failures: messagebox.showwarning("Redo Failed", "\n".join(failures))
         self.scan_root()
-        self.history_panel.refresh(self.history)
-
 
     def clear_history(self):
         if messagebox.askyesno("Clear History", "This will clear all undo/redo history. Continue?"):
             self.history.clear()
-            self.history_panel.refresh(self.history)
+
+    def log(self, message):
+        self.console.log(message)
 
     def open_settings(self):
         SettingsDialog(self)
@@ -770,7 +839,7 @@ class JMADMediaTool(tb.Window):
             messagebox.showwarning("No Series Selected", "Please select one or more top-level series folders to clean.")
             return
 
-        tv_root = self.settings.get("tv_root")
+        tv_root = self.settings.get("directories", {}).get("staging")
         if not tv_root: return
 
         files_to_delete = []
@@ -803,6 +872,7 @@ class JMADMediaTool(tb.Window):
                 except OSError:
                     failed_count += 1
             
+            self.log(f"Cleaned {deleted_count} files. Failed on {failed_count}.")
             messagebox.showinfo("Cleanup Complete", f"Successfully deleted {deleted_count} files.\nFailed to delete {failed_count} files.")
             self.scan_root()
 
@@ -812,14 +882,13 @@ class JMADMediaTool(tb.Window):
             messagebox.showwarning("No Series Selected", "Please select one or more top-level series folders to move.")
             return
 
-        tv_root = self.settings.get("tv_root")
+        tv_root = self.settings.get("directories", {}).get("staging")
         if not tv_root: return
         
         if destination is None:
             destination = filedialog.askdirectory(title="Select Destination Folder", initialdir=tv_root)
         
-        if not destination:
-            return
+        if not destination: return
 
         moves = []
         conflicts = []
@@ -836,14 +905,13 @@ class JMADMediaTool(tb.Window):
         if conflicts:
             messagebox.showerror("Move Error", "The following series already exist in the destination and were not moved:\n\n" + "\n".join(conflicts))
 
-        if not moves:
-            return
+        if not moves: return
 
         series_count = len(moves)
         if not messagebox.askyesno("Confirm Move", f"Move {series_count} series to the new location?"):
             return
 
-        action = BatchAction(f"Move {series_count} series", moves)
+        action = BatchAction(f"Move {series_count} series to '{os.path.basename(destination)}'", moves)
         failures = self.history.execute_action(action, stop_at=os.path.dirname(tv_root))
         
         if failures:
@@ -851,20 +919,50 @@ class JMADMediaTool(tb.Window):
         
         self.scan_root()
 
-    def show_tooltip(self, text: str, x: int, y: int):
-        self.hide_tooltip()
-        if not text or len(text.strip()) < 1: return
-        self._tooltip_win = tk.Toplevel(self)
-        self._tooltip_win.wm_overrideredirect(True)
-        self._tooltip_win.wm_geometry(f"+{x+20}+{y+20}")
-        bg = self.style.colors.get('light')
-        fg = self.style.colors.get('dark')
-        tb.Label(self._tooltip_win, text=text, relief="solid", background=bg, foreground=fg, padding=5).pack()
+    def toggle_console(self):
+        self.settings["console_visible"] = not self.settings.get("console_visible", True)
+        save_settings(self.settings)
 
-    def hide_tooltip(self, event=None):
-        if self._tooltip_win:
-            self._tooltip_win.destroy()
-            self._tooltip_win = None
+        if hasattr(self.console, 'hide_btn'):
+            new_text = "Hide" if self.settings["console_visible"] else "Show"
+            self.console.hide_btn.config(text=new_text)
+
+        self._update_layout_after_console_change()
+        self._build_tools_menu()
+        
+    def check_for_updates_simulated(self):
+        latest_version = "7.0" 
+        if CURRENT_VERSION < latest_version:
+            if messagebox.askyesno("Update Available", f"Version {latest_version} is available.\nWould you like to update now?"):
+                progress_win = tb.Toplevel(title="Downloading Update...")
+                progress_win.geometry("300x100")
+                pb = tb.Progressbar(progress_win, mode='determinate', bootstyle='success-striped')
+                pb.pack(fill='x', padx=20, pady=20)
+                progress_win.transient(self)
+                progress_win.grab_set()
+
+                def update_progress(val=0):
+                    if val < 100:
+                        pb.step(2)
+                        progress_win.after(50, lambda: update_progress(val + 2))
+                    else:
+                        progress_win.destroy()
+                        messagebox.showinfo("Update Complete", "Update downloaded. Please restart the application.")
+                update_progress()
+
+    def _select_all(self, event):
+        widget = event.widget
+        if isinstance(widget, tb.Treeview):
+            all_items = self._get_all_tree_children(widget, "")
+            widget.selection_set(all_items)
+            return "break"
+            
+    def _get_all_tree_children(self, tree, item_id: str) -> List[str]:
+        children = []
+        for child_id in tree.get_children(item_id):
+            children.append(child_id)
+            children.extend(self._get_all_tree_children(tree, child_id))
+        return children
 
 # -------------------------
 # Dialog Windows
@@ -873,98 +971,124 @@ class SettingsDialog(tk.Toplevel):
     def __init__(self, parent: JMADMediaTool):
         super().__init__(parent)
         self.parent = parent
-        self.settings = dict(parent.settings)
+        self.settings = json.loads(json.dumps(parent.settings))
+        self.patterns = parent.fluff_patterns[:]
         self.title("Settings")
         self.transient(parent)
         self.grab_set()
+        
         self._build_ui()
-
-        self.update_idletasks()
         self.resizable(True, True)
-        self.minsize(self.winfo_reqwidth(), self.winfo_reqheight())
-        parent_x = self.master.winfo_x()
-        parent_y = self.master.winfo_y()
-        parent_w = self.master.winfo_width()
-        parent_h = self.master.winfo_height()
-        win_w = self.winfo_width()
-        win_h = self.winfo_height()
-        x = parent_x + (parent_w // 2) - (win_w // 2)
-        y = parent_y + (parent_h // 2) - (win_h // 2)
-        self.geometry(f"+{x}+{y}")
+        self.minsize(600, 500)
 
     def _build_ui(self):
-        self.rowconfigure(0, weight=1)
         self.columnconfigure(0, weight=1)
-
-        frm = tb.Frame(self, padding=10)
-        frm.grid(row=0, column=0, sticky="nsew")
-        frm.columnconfigure(1, weight=1)
-        frm.rowconfigure(4, weight=1)
-
-        tb.Label(frm, text="TV Root Folder:").grid(row=0, column=0, sticky="w", pady=6)
-        self.var_tv_root = tk.StringVar(value=self.settings.get("tv_root", ""))
-        tb.Entry(frm, textvariable=self.var_tv_root).grid(row=0, column=1, sticky="ew", padx=6)
-        tb.Button(frm, text="Browse...", command=self._browse, bootstyle="outline-secondary").grid(row=0, column=2, padx=6)
+        self.rowconfigure(0, weight=1)
         
-        tb.Label(frm, text="Rename Pattern:").grid(row=1, column=0, sticky="nw", pady=6)
-        self.var_pattern = tk.StringVar(value=self.settings.get("episode_pattern", ""))
-        tb.Entry(frm, textvariable=self.var_pattern).grid(row=1, column=1, sticky="ew", padx=6, columnspan=2)
-        tb.Label(frm, text="Keys: {series}, {season:02d}, {episode:02d}, {ext}").grid(row=2, column=1, sticky="w")
-        
-        tb.Label(frm, text="Theme:").grid(row=3, column=0, sticky="w", pady=10)
-        self.var_theme = tk.StringVar(value=self.settings.get("theme"))
-        tb.Combobox(frm, textvariable=self.var_theme, values=VALID_THEMES, state="readonly").grid(row=3, column=1, sticky="w", padx=6)
+        notebook = tb.Notebook(self)
+        notebook.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
 
-        preset_frame = tb.LabelFrame(frm, text="Move To Presets", padding=10)
-        preset_frame.grid(row=4, column=0, columnspan=3, sticky="nsew", pady=(10,0))
-        preset_frame.columnconfigure(0, weight=1)
-        preset_frame.rowconfigure(0, weight=1)
+        self._build_general_tab(notebook)
+        self._build_patterns_tab(notebook)
 
-        self.preset_listbox = tk.Listbox(preset_frame)
-        self.preset_listbox.grid(row=0, column=0, sticky="nsew")
-        
-        preset_buttons = tb.Frame(preset_frame)
-        preset_buttons.grid(row=0, column=1, sticky="ns", padx=(5,0))
-        tb.Button(preset_buttons, text="Add", command=self._add_preset, bootstyle="outline-success").pack(fill="x")
-        tb.Button(preset_buttons, text="Delete", command=self._delete_preset, bootstyle="outline-danger").pack(fill="x", pady=(5,0))
-
-        for preset in self.settings.get("move_presets", []):
-            self.preset_listbox.insert(tk.END, preset)
-        
         btn_frame = tb.Frame(self)
-        btn_frame.grid(row=1, column=0, sticky="sew", padx=10, pady=10)
+        btn_frame.grid(row=1, column=0, sticky="sew", padx=10, pady=(0, 10))
         btn_frame.columnconfigure(0, weight=1)
-        
         tb.Button(btn_frame, text="Save", command=self._save, bootstyle="outline-success").grid(row=0, column=2, padx=6)
         tb.Button(btn_frame, text="Cancel", command=self.destroy, bootstyle="outline-danger").grid(row=0, column=1)
 
+    def _build_general_tab(self, notebook):
+        frm = tb.Frame(notebook, padding=10)
+        notebook.add(frm, text="General")
+        frm.columnconfigure(1, weight=1)
 
-    def _browse(self):
-        p = filedialog.askdirectory(title="Select TV Root Folder", initialdir=self.var_tv_root.get())
-        if p: self.var_tv_root.set(p)
+        tb.Label(frm, text="Episode Pattern:").grid(row=0, column=0, sticky="w", pady=6)
+        self.ep_pattern_var = tk.StringVar(value=self.settings.get("episode_pattern", ""))
+        tb.Entry(frm, textvariable=self.ep_pattern_var).grid(row=0, column=1, sticky="ew")
 
-    def _add_preset(self):
-        path = filedialog.askdirectory(title="Select Preset Folder")
-        if path:
-            self.preset_listbox.insert(tk.END, path)
+        tb.Label(frm, text="Movie Pattern:").grid(row=1, column=0, sticky="w", pady=6)
+        self.movie_pattern_var = tk.StringVar(value=self.settings.get("movie_pattern", ""))
+        tb.Entry(frm, textvariable=self.movie_pattern_var).grid(row=1, column=1, sticky="ew")
 
-    def _delete_preset(self):
-        selection = self.preset_listbox.curselection()
-        if selection:
-            self.preset_listbox.delete(selection[0])
+        self.console_visible_var = tk.BooleanVar(value=self.settings.get("console_visible", True))
+        tb.Checkbutton(frm, text="Console Visible by Default", variable=self.console_visible_var).grid(row=2, column=1, sticky="w", pady=10)
+
+        dir_frame = tb.LabelFrame(frm, text="Directories", padding=10)
+        dir_frame.grid(row=3, column=0, columnspan=3, sticky="nsew")
+        dir_frame.columnconfigure(1, weight=1)
+        
+        self.dir_entries = {}
+        for i, (key, path) in enumerate(self.settings.get("directories", {}).items()):
+            label_text = f"{key.replace('_', ' ').title()}:"
+            tb.Label(dir_frame, text=label_text).grid(row=i, column=0, sticky="w", padx=5)
+            var = tk.StringVar(value=path)
+            tb.Entry(dir_frame, textvariable=var).grid(row=i, column=1, sticky="ew")
+            tb.Button(dir_frame, text="...", command=lambda v=var: self._browse_dir(v)).grid(row=i, column=2, padx=5)
+            self.dir_entries[key] = var
+    
+    def _build_patterns_tab(self, notebook):
+        frm = tb.Frame(notebook, padding=10)
+        notebook.add(frm, text="Patterns")
+        frm.columnconfigure(0, weight=1)
+        frm.rowconfigure(0, weight=1)
+
+        tb.Label(frm, text="Regex Patterns for Name Suggestions").pack()
+        
+        list_frame = tb.Frame(frm)
+        list_frame.pack(fill="both", expand=True, pady=5)
+        list_frame.columnconfigure(0, weight=1)
+        list_frame.rowconfigure(0, weight=1)
+        
+        self.patterns_listbox = tk.Listbox(list_frame)
+        self.patterns_listbox.grid(row=0, column=0, sticky="nsew")
+        for p in self.patterns:
+            self.patterns_listbox.insert(tk.END, p)
+        
+        btn_frame = tb.Frame(frm)
+        btn_frame.pack(fill="x")
+        tb.Button(btn_frame, text="Add", command=self._add_pattern).pack(side="left")
+        tb.Button(btn_frame, text="Edit", command=self._edit_pattern).pack(side="left", padx=5)
+        tb.Button(btn_frame, text="Delete", command=self._delete_pattern).pack(side="left")
+
+    def _browse_dir(self, var):
+        path = filedialog.askdirectory(title="Select Folder", initialdir=var.get())
+        if path: var.set(path)
+
+    def _add_pattern(self):
+        new_pattern = simpledialog.askstring("Add Pattern", "Enter new regex pattern:", parent=self)
+        if new_pattern: self.patterns_listbox.insert(tk.END, new_pattern)
+    
+    def _edit_pattern(self):
+        selection = self.patterns_listbox.curselection()
+        if not selection: return
+        idx = selection[0]
+        old_pattern = self.patterns_listbox.get(idx)
+        new_pattern = simpledialog.askstring("Edit Pattern", "Edit regex pattern:", initialvalue=old_pattern, parent=self)
+        if new_pattern:
+            self.patterns_listbox.delete(idx)
+            self.patterns_listbox.insert(idx, new_pattern)
+
+    def _delete_pattern(self):
+        selection = self.patterns_listbox.curselection()
+        if selection: self.patterns_listbox.delete(selection[0])
 
     def _save(self):
-        self.settings["tv_root"] = self.var_tv_root.get().strip()
-        self.settings["episode_pattern"] = self.var_pattern.get().strip()
-        self.settings["theme"] = self.var_theme.get()
-        self.settings["move_presets"] = list(self.preset_listbox.get(0, tk.END))
-        
+        self.settings["episode_pattern"] = self.ep_pattern_var.get()
+        self.settings["movie_pattern"] = self.movie_pattern_var.get()
+        self.settings["console_visible"] = self.console_visible_var.get()
+        for key, var in self.dir_entries.items():
+            self.settings["directories"][key] = var.get()
+
         save_settings(self.settings)
-        self.master.settings = self.settings
-        self.master._build_tools_menu() # Rebuild menu to reflect changes
+        self.parent.settings = self.settings
+
+        new_patterns = list(self.patterns_listbox.get(0, tk.END))
+        save_patterns(new_patterns)
+        self.parent.fluff_patterns = new_patterns
+
+        self.parent._build_tools_menu()
+        self.parent.log("Settings saved.")
         self.destroy()
-        messagebox.showinfo("Settings Saved", "Settings have been saved. A restart is required for theme changes to take full effect.")
-        self.master.scan_root()
 
 class OrganizeDialog(tk.Toplevel):
     def __init__(self, parent: "JMADMediaTool", series_list: List[Series]):
@@ -1168,8 +1292,8 @@ class OrganizeDialog(tk.Toplevel):
         self._capture_state()
 
     def _populate_tree_with_series_files(self, tree, series):
-        tv_root = self.master.settings.get("tv_root", "")
-        series_path = os.path.join(tv_root, series.name)
+        staging_dir = self.parent_app.settings.get("directories", {}).get("staging", "")
+        series_path = os.path.join(staging_dir, series.name)
         
         def add_to_tree(parent_id, current_path):
             try:
@@ -1281,13 +1405,13 @@ class OrganizeDialog(tk.Toplevel):
 
     def suggest_name(self, event=None):
         if self.is_combine_mode:
-            name_stems = [suggest_series_name(s.name) for s in self.all_series]
+            name_stems = [suggest_series_name(s.name, self.parent_app.fluff_patterns) for s in self.all_series]
             if name_stems:
                 most_common_name = Counter(name_stems).most_common(1)[0][0]
                 self.suggestion_label.config(text=most_common_name)
                 return
         
-        suggested = suggest_series_name(self.target_series.name)
+        suggested = suggest_series_name(self.target_series.name, self.parent_app.fluff_patterns)
         self.suggestion_label.config(text=suggested)
 
 
@@ -1453,14 +1577,14 @@ class OrganizeDialog(tk.Toplevel):
             messagebox.showerror("Invalid Name", "Final series name cannot be empty.")
             return
 
-        tv_root = self.master.settings.get("tv_root")
-        final_series_path = os.path.join(tv_root, final_target_name)
+        staging_dir = self.parent_app.settings.get("directories", {}).get("staging")
+        final_series_path = os.path.join(staging_dir, final_target_name)
         original_names = {s.name for s in self.all_series}
 
         if final_target_name not in original_names and os.path.isdir(final_series_path):
             messagebox.showinfo("Conflict Detected", f"A folder named '{final_target_name}' already exists and was not part of this organization session. It will be added to the source list so you can combine it.")
             
-            conflicting_series = self.master.series_map.get(final_target_name)
+            conflicting_series = self.parent_app.series_map.get(final_target_name)
             if conflicting_series and conflicting_series not in self.all_series:
                 self._capture_state()
                 self.all_series.append(conflicting_series)
@@ -1477,7 +1601,7 @@ class OrganizeDialog(tk.Toplevel):
         metadata_to_create_path: Optional[str] = None
 
         if not self.structure_changed and not self.is_combine_mode and final_target_name != self.target_series.name:
-            original_path = os.path.join(tv_root, self.target_series.name)
+            original_path = os.path.join(staging_dir, self.target_series.name)
             all_moves = [(original_path, final_series_path)]
             description = f"Rename series {self.target_series.name} -> {final_target_name}"
         else:
@@ -1491,8 +1615,8 @@ class OrganizeDialog(tk.Toplevel):
                     if os.path.abspath(original_path) != os.path.abspath(current_path):
                         all_moves.append((original_path, current_path))
                 if self.target_tree.get_children(item_id):
-                     for child_id in self.target_tree.get_children(item_id):
-                        plan_moves_from_tree(child_id, current_path)
+                        for child_id in self.target_tree.get_children(item_id):
+                            plan_moves_from_tree(child_id, current_path)
             for top_item_id in self.target_tree.get_children(""):
                 plan_moves_from_tree(top_item_id, final_series_path)
             
@@ -1504,13 +1628,13 @@ class OrganizeDialog(tk.Toplevel):
         if not all_moves and not metadata_changed:
             messagebox.showinfo("Organize", "No changes to apply.")
             return
-             
+            
         if all_moves and not messagebox.askyesno("Confirm Changes", f"Apply {len(all_moves)} file/folder operations?"):
             return
         
         action = BatchAction(description, all_moves)
         action.metadata_path = metadata_to_create_path
-        failures = self.master.history.execute_action(action, stop_at=tv_root)
+        failures = self.parent_app.history.execute_action(action, stop_at=staging_dir)
 
         if not failures:
             metadata = {
@@ -1524,16 +1648,16 @@ class OrganizeDialog(tk.Toplevel):
             except Exception as e:
                 failures.append(f"Could not write metadata: {e}")
 
-            source_folders_to_prune = {os.path.join(tv_root, s.name) for s in self.all_series}
+            source_folders_to_prune = {os.path.join(staging_dir, s.name) for s in self.all_series}
             for path in source_folders_to_prune:
                 if os.path.abspath(path) != os.path.abspath(final_series_path):
-                    prune_empty_dirs(path, stop_at=tv_root)
+                    prune_empty_dirs(path, stop_at=staging_dir)
 
         if failures:
             messagebox.showerror("Operation Failed", "Some operations failed. Please review the changes.\n\n" + "\n".join(failures))
         
         self.destroy()
-        self.master.scan_root()
+        self.parent_app.scan_root()
 
 class AssociateMovieDialog(tk.Toplevel):
     def __init__(self, parent: "JMADMediaTool", movies_to_associate: List[Series], all_series_names: List[str]):
@@ -1592,21 +1716,21 @@ class AssociateMovieDialog(tk.Toplevel):
             messagebox.showwarning("No Series Selected", "Please select a parent series.", parent=self)
             return
             
-        tv_root = self.parent_app.settings.get("tv_root")
-        if not tv_root: return
+        staging_dir = self.parent_app.settings.get("directories", {}).get("staging")
+        if not staging_dir: return
         
         moves = []
         for movie_series in self.movies:
-            src_path = os.path.join(tv_root, movie_series.name)
-            dst_path = os.path.join(tv_root, parent_series_name, "Movies", movie_series.name)
+            src_path = os.path.join(staging_dir, movie_series.name)
+            dst_path = os.path.join(staging_dir, parent_series_name, "Movies", movie_series.name)
             moves.append((src_path, dst_path))
             
         action = BatchAction(f"Associate {len(moves)} movie(s) with {parent_series_name}", moves)
         
-        parent_series_path = os.path.join(tv_root, parent_series_name)
+        parent_series_path = os.path.join(staging_dir, parent_series_name)
         action.metadata_path = os.path.join(parent_series_path, METADATA_FILENAME) 
         
-        failures = self.parent_app.history.execute_action(action, stop_at=tv_root)
+        failures = self.parent_app.history.execute_action(action, stop_at=staging_dir)
         
         if failures:
             messagebox.showerror("Operation Failed", "Some movies failed to associate:\n\n" + "\n".join(failures))
@@ -1614,15 +1738,14 @@ class AssociateMovieDialog(tk.Toplevel):
         self.destroy()
         self.parent_app.scan_root()
 
-
 # -------------------------
 # Entrypoint
 # -------------------------
 def main():
     settings = load_settings()
-    app = JMADMediaTool(settings)
+    patterns = load_patterns()
+    app = JMADMediaTool(settings, patterns)
     app.mainloop()
 
 if __name__ == "__main__":
     main()
-

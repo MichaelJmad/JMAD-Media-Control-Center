@@ -1,0 +1,50 @@
+{
+    "general": {
+        "start_with_windows": false,
+        "minimize_to_tray": false,
+        "show_notifications": true
+    },
+    "directories": {
+        "staging": "",
+        "libraries": []
+    },
+    "renaming": {
+        "folder_template": "{series_name} - Season {season_number}",
+        "file_template": "{series_name} - S{season_number:02d}E{episode_number:02d} - {episode_title}"
+    },
+    "metadata": {
+        "providers": [
+            "tmdb",
+            "tvdb"
+        ],
+        "api_keys": {
+            "tmdb": "",
+            "tvdb": ""
+        }
+    },
+    "libraries_scan": {
+        "scan_on_startup": false,
+        "scan_interval_hours": 0
+    },
+    "cleaning": {
+        "default_categories": [
+            "txt",
+            "nfo"
+        ]
+    },
+    "trash_bin": {
+        "enabled": true,
+        "auto_purge_days": 30
+    },
+    "appearance": {
+        "theme": "system",
+        "font_size": "normal"
+    },
+    "hotkeys": {
+        "open_settings": "Ctrl+,",
+        "scan_staging": "F5"
+    },
+    "performance": {
+        "concurrent_operations": 4
+    }
+}

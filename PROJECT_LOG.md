@@ -1,48 +1,63 @@
 # JMAD Media Tool V2 - Project Log
 
-## 2025-10-12: Initial Development & Phase 2 Completion
+---
+**Date:** October 18, 2025
+**Version:** 2.0.0 (Initial Plan)
 
-This log entry summarizes the initial development sprint, covering the completion of Phase 1 and Phase 2 of the V2.0 implementation roadmap.
+## Phase 0: Foundation & UI Shell
 
-### Phase 1: Foundation & UI Shell (Complete)
+This phase focuses on building the complete, non-functional skeleton of the application, providing a solid framework for future development.
 
-The initial phase focused on establishing the core architecture and UI skeleton of the application.
+### Subphase 0.1: Project Scaffolding
+- **Goal:** Establish the core project structure and dependencies.
+- **Actions:**
+  - Create directories: `v2/app`, `v2/config`, `v2/tests`.
+  - Create main entry point: `v2/main.py`.
+  - Create dependency list: `v2/requirements.txt` with `PySide6`, `watchdog`, and `requests`.
 
-- **Project Structure:** A new `v2` directory was created to house the new application, separating it from the V1 files. A full subdirectory structure (`app`, `ui`, `services`, `database`) was created.
-- **Dependencies:** The project was set up to use `PySide6` for the UI, `watchdog` for file monitoring, and `requests` for future API calls.
-- **UI Shell:** The main application window was built using `PySide6`. It features a three-panel layout with resizable splitters for the Media Tree, Info/Preview, and Console panels. Based on initial review, the top menu bar was removed in favor of a cleaner toolbar-only navigation.
-- **Database:** A `DatabaseManager` class was created to handle an SQLite database. The manager was later refactored to be thread-safe using `threading.local()` to prevent cross-thread errors during background operations.
+### Subphase 0.2: Database Initialization
+- **Goal:** Create the foundational database management components.
+- **Actions:**
+  - Create `v2/app/database_manager.py` to handle all database interactions.
+  - Define the initial database schema within the manager.
 
-### Phase 2: Directory Scanning & State Display (Complete)
+### Subphase 0.3: Main Window Construction
+- **Goal:** Build the primary application window and layout.
+- **Actions:**
+  - Create `v2/app/main_window.py`.
+  - Implement the three-panel layout with draggable splitters.
+  - Implement the main toolbar and menu structure with disabled actions.
+---
+**Date:** October 18, 2025
+**Status:** Completed
 
-This phase focused on making the application aware of the file system and displaying that information to the user.
+### Subphase 0.1: Project Scaffolding
+- **Outcome:** The core project structure (`v2/app`, `v2/config`, `v2/tests`), the main entry point (`v2/main.py`), and the dependency file (`v2/requirements.txt`) have been successfully created. The project foundation is now in place.
+---
+**Date:** October 18, 2025
+**Status:** Completed
 
-- **File System Monitoring:** A `DirectoryMonitor` service was implemented to run in a background thread and watch the `staging` directory for file creation, deletion, and modification events.
-- **State Management:** A `StateManager` was created to interface between the `DirectoryMonitor` and the `DatabaseManager`. When a new file is detected, the `StateManager` now correctly adds it to the database with an "Unorganized" status.
-- **UI Population & Tree View:** The placeholder label in the UI's left panel was replaced with a `QTreeView`. Logic was implemented to read all media items from the database and populate the tree.
-- **Hierarchical Display:** The tree view logic was significantly refined to correctly parse file paths and display them in a nested (hierarchical) folder structure, mirroring the file system. This involved fixing several bugs related to path-splitting on Windows.
-- **Selection Model:** Based on a clarification of the project requirements, the tree view was updated to support standard multi-item selection using `Ctrl` and `Shift` keys (`ExtendedSelection`). The initial single-click toggle implementation was removed.
+### Subphase 0.2: Database Initialization
+- **Outcome:** The `DatabaseManager` class has been created in `v2/app/database_manager.py`, and the SQLite database has been initialized at `v2/config/jmad_media_tool_v2.db` with the complete schema. The application now has a persistent data store.
+---
+**Date:** October 18, 2025
+**Status:** Completed
 
-### Phase 3: The Unified Organize View (In Progress)
+### Subphase 0.3: Main Window Construction
+- **Outcome:** The `MainWindow` class has been created in `v2/app/main_window.py`, featuring the three-panel layout, menu bar, and toolbar. The main entry point `v2/main.py` has been updated to launch the new window. The application's UI shell is now complete.
+---
+**Date:** October 18, 2025
+**Status:** Completed
 
-Work has begun on the core organization feature.
+### Subphase 1.1: Build the Settings UI
+- **Outcome:** The `SettingsDialog` has been created in `v2/app/settings_dialog.py` with a tabbed interface for all setting categories. The main window's "Settings" button now opens this dialog. The UI for the settings is now in place.
+---
+**Date:** October 18, 2025
+**Note:** Based on user feedback, the Settings Dialog UI has been redesigned from a tabbed layout to a more scalable sidebar layout using a `QListWidget` and `QStackedWidget`.
+---
+**Date:** October 18, 2025
+**Status:** Completed
 
-- **Dialog Creation (Subphase 3.1):**
-    - The UI shell for the `OrganizeDialog` has been created.
-    - The layout was significantly refined based on user feedback. The final layout includes a top search bar with a "Search" button, and a central "Action Pane" containing buttons for "Set as Season", "Set as Movie", "Set as Special", "Set as Custom", "Auto-Sort", "Undo", "Redo", and "Remove".
-    - The logic to populate the dialog's "Source" tree was implemented. This logic correctly gathers all files from the user's selection in the main window (including expanding selected folders) and displays them in a nested tree.
-
-- **Dialog Refinement (Subphase 3.1):** The layout for the `OrganizeDialog` was finalized after several iterations based on user feedback. The final design includes a "Search" button in the top toolbar and a central action pane with buttons for "Set as Season", "Set as Movie", "Set as Special", "Set as Custom", "Auto-Sort", "Undo", and "Redo". The logic to populate the dialog's source tree was also debugged to correctly handle nested structures when a folder is selected.
-- **Series Search (Subphase 3.2):** Initial functionality has been implemented. The application now makes a "best guess" for the series title to auto-populate the search bar. The "Search" button "locks in" the title (whether guessed or manually entered) and displays it in a "Confirmed Title" label, preparing it for subsequent operations. This involved debugging the title-guessing logic and fixing a regex-related crash.
-
-### Current Application State
-
-The application is currently in a stable state where it can:
-- Launch and display the main window.
-- Monitor the `staging` directory for new files and add them to a persistent database in a thread-safe manner.
-- Display all files from the database in a nested tree structure in the main window.
-- Support multi-selection of items in the tree.
-- Open the `OrganizeDialog` and populate its source view with the selected files.
-- In the dialog, it can guess the series title and allow the user to "lock in" a confirmed title.
-
-The next step is to begin implementing the manual sorting functionality (**Subphase 3.3**), starting with the "Set as Season" button.
+### Subphase 1.2: Implement Configuration Backend
+- **Outcome:** The `SettingsManager` class has been created in `v2/app/settings_manager.py`. It successfully loads default settings and creates a persistent `settings.json` file in the `v2/config` directory. The application now has a functional settings backend.
+---
