@@ -1,6 +1,6 @@
 {
   "directories": {
-    "staging": "G:/Staging/TV",
+    "staging": "L:/Projects/JMAD-Media-Tool/staging",
     "tv_shows": "",
     "movies": "",
     "anime": ""
@@ -8,5 +8,26 @@
   "episode_pattern": "{series} - S{season:02d}E{episode:02d}{ext}",
   "movie_pattern": "{series} ({year}){ext}",
   "console_visible": true,
-  "move_presets": []
+  "move_presets": [],
+  "cleanup_ext_states": {
+    "selected": [
+      ".pdf",
+      ".torrent",
+      ".png",
+      ".jpeg",
+      ".htm",
+      ".gif",
+      ".docx",
+      ".php",
+      ".mp3",
+      ".xml",
+      ".jpg",
+      ".txt",
+      ".nfo",
+      ".json",
+      ".html",
+      ".srt"
+    ],
+    "custom_exts_str": ""
+  }
 }
