@@ -1,0 +1,56 @@
+{
+  "directories": {
+    "staging": "L:/Projects/JMAD-Media-Tool/staging",
+    "tv_shows": "",
+    "movies": "",
+    "anime": "",
+    "trash": "L:/Projects/JMAD-Media-Tool/Trash"
+  },
+  "series_pattern": "{clean}",
+  "episode_pattern": "{series} - S{season:02d}E{episode:02d}{ext}",
+  "movie_pattern": "{series} - ({year}){ext}",
+  "console_visible": true,
+  "show_organize_confirmation": false,
+  "use_season_00_for_specials": false,
+  "org_folder_anime": "Anime",
+  "org_folder_tv_shows": "TV Shows",
+  "org_folder_movies": "Movies",
+  "hotkeys": {},
+  "move_presets": [],
+  "cleanup_ext_states": {
+    "selected": [
+      ".jpg",
+      ".jpeg",
+      ".png",
+      ".gif",
+      ".bmp",
+      ".txt",
+      ".nfo",
+      ".md",
+      ".html",
+      ".htm",
+      ".xml",
+      ".pdf",
+      ".docx",
+      ".doc",
+      ".srt",
+      ".sub",
+      ".ssa",
+      ".ass",
+      ".mp3",
+      ".aac",
+      ".flac",
+      ".json",
+      ".yml",
+      ".yaml",
+      ".torrent"
+    ],
+    "custom_exts_str": ""
+  },
+  "fluff_patterns": [
+    "\\[.*?\\]",
+    "\\(.*?\\)",
+    "\\b(1080p|720p|2160p|4k|x264|x265|h264|h265|hevc|webrip|bluray|bdrip)\\b",
+    "(s\\d+)"
+  ]
+}

@@ -1,0 +1,1339 @@
+"""Main application window"""
+from PySide6.QtWidgets import (
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QPushButton, QTreeWidget, QTreeWidgetItem, QMessageBox,
+    QSplitter, QTextEdit, QLabel, QTabWidget, QMenu
+)
+from PySide6.QtCore import Qt, QFileSystemWatcher, QTimer
+from PySide6.QtGui import QColor, QShortcut, QKeySequence
+from typing import Optional, List, Dict
+from pathlib import Path
+
+from config.settings import Settings
+from infrastructure.repositories.settings_repository import SettingsRepository
+from infrastructure.services.file_system_service import FileSystemService
+from infrastructure.services.history_service import HistoryService
+from infrastructure.parsers.fluff_parser import FluffParser
+from application.use_cases.scan_media import ScanMediaUseCase
+from application.use_cases.cleanup_files import CleanupFilesUseCase
+from application.use_cases.move_series import MoveSeriesUseCase
+from application.use_cases.organize_folders import OrganizeFoldersUseCase
+from presentation.widgets.cleanup_panel import CleanupPanel
+from presentation.widgets.settings_panel import SettingsPanel
+from presentation.widgets.hotkeys_panel import HotkeysPanel
+from presentation.widgets.toast import Toast
+from presentation.dialogs.organize_dialog import OrganizeDialog
+from presentation.dialogs.media_type_dialog import MediaTypeDialog
+from presentation.dialogs.series_organize_dialog import SeriesOrganizeDialog
+from presentation.dialogs.movies_organize_dialog import MoviesOrganizeDialog
+from domain.value_objects.file_path import FilePath
+
+
+class MainWindow(QMainWindow):
+    """Main application window"""
+
+    def __init__(self):
+        super().__init__()
+
+        # Initialize services
+        self.settings_repo = SettingsRepository()
+        self.settings = self.settings_repo.load()
+        self.file_system = FileSystemService()
+        self.history = HistoryService(self.file_system, self.log)
+
+        # Current scan result
+        self.scan_result = None
+
+        # Setup UI
+        self.setWindowTitle("JMAD Media Tool - Refactored V1")
+        self.setGeometry(100, 100, 1400, 800)
+
+        self._build_ui()
+
+        # Setup keyboard shortcuts for undo/redo
+        self._setup_keyboard_shortcuts()
+
+        # Setup file system watcher for staging directory
+        self._setup_file_watcher()
+
+        # Auto-scan on launch (delayed to let UI render)
+        QTimer.singleShot(100, self._initial_scan)
+
+    def _build_ui(self):
+        """Build the user interface"""
+        # Central widget
+        central = QWidget()
+        self.setCentralWidget(central)
+
+        # Main layout
+        layout = QVBoxLayout(central)
+
+        # Create toolbar at the top with split button layout
+        toolbar_layout = QHBoxLayout()
+
+        # Left stretch to push center buttons to middle
+        toolbar_layout.addStretch()
+
+        # Center buttons (Scan and Organize)
+        center_buttons_layout = self._create_center_toolbar()
+        toolbar_layout.addLayout(center_buttons_layout)
+
+        # Middle stretch to keep center buttons centered
+        toolbar_layout.addStretch()
+
+        # Right buttons (Undo and Redo)
+        right_buttons_layout = self._create_right_toolbar()
+        toolbar_layout.addLayout(right_buttons_layout)
+
+        layout.addLayout(toolbar_layout)
+
+        # Tab widget for main content
+        self.tabs = QTabWidget()
+        self.tabs.currentChanged.connect(self._on_tab_changed)
+
+        # Create media browser tab
+        media_tab = self._create_media_tab()
+        self.tabs.addTab(media_tab, "Media Browser")
+
+        # Create settings tab with subtabs
+        settings_container = self._create_settings_tab()
+        self.tabs.addTab(settings_container, "Settings")
+
+        layout.addWidget(self.tabs)
+
+        # Status bar
+        self.statusBar().showMessage("Ready")
+
+    def _create_media_tab(self) -> QWidget:
+        """Create the media browser tab content"""
+        media_widget = QWidget()
+        media_layout = QVBoxLayout(media_widget)
+        media_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Main horizontal splitter (60/40 split: tree | right pane)
+        main_splitter = QSplitter(Qt.Horizontal)
+
+        # Left: Media tree (25%)
+        tree_widget = QWidget()
+        tree_layout = QVBoxLayout(tree_widget)
+        tree_layout.setContentsMargins(0, 0, 0, 0)
+
+        tree_header = QLabel("Media Tree")
+        tree_header.setStyleSheet("font-weight: bold; padding: 5px;")
+        tree_layout.addWidget(tree_header)
+
+        self.media_tree = QTreeWidget()
+        self.media_tree.setHeaderLabels(["Folder Name", "File Count", "Media Type"])
+        self.media_tree.setColumnWidth(0, 350)
+        self.media_tree.setColumnWidth(1, 100)
+        self.media_tree.setColumnWidth(2, 120)
+
+        # Enable multi-select with standard keybindings (Ctrl+Click, Shift+Click)
+        self.media_tree.setSelectionMode(QTreeWidget.ExtendedSelection)
+
+        # Enable context menu (right-click)
+        self.media_tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.media_tree.customContextMenuRequested.connect(self._show_tree_context_menu)
+
+        # Connect selection change to update organize button
+        self.media_tree.itemSelectionChanged.connect(self._on_tree_selection_changed)
+
+        tree_layout.addWidget(self.media_tree)
+
+        main_splitter.addWidget(tree_widget)
+
+        # Right: Vertical splitter for cleanup tool and console (50/50 split)
+        right_splitter = QSplitter(Qt.Vertical)
+
+        # Top: Cleanup Tool (50%)
+        cleanup_container = QWidget()
+        cleanup_container_layout = QVBoxLayout(cleanup_container)
+        cleanup_container_layout.setContentsMargins(0, 0, 0, 0)
+
+        cleanup_header = QLabel("Cleanup Tool")
+        cleanup_header.setStyleSheet("font-weight: bold; padding: 5px; background-color: #2a2a2a; color: white;")
+        cleanup_container_layout.addWidget(cleanup_header)
+
+        # Cleanup panel widget
+        self.cleanup_panel = CleanupPanel()
+        self.cleanup_panel.cleanup_requested.connect(self._on_cleanup_requested)
+
+        # Load saved cleanup settings
+        if self.settings.cleanup_ext_states:
+            self.cleanup_panel.load_settings(self.settings.cleanup_ext_states)
+
+        cleanup_container_layout.addWidget(self.cleanup_panel)
+
+        right_splitter.addWidget(cleanup_container)
+
+        # Bottom: Console tabs (50%)
+        console_container = QWidget()
+        console_container_layout = QVBoxLayout(console_container)
+        console_container_layout.setContentsMargins(0, 0, 0, 0)
+
+        console_header = QLabel("Console & Preview")
+        console_header.setStyleSheet("font-weight: bold; padding: 5px; background-color: #2a2a2a; color: white;")
+        console_container_layout.addWidget(console_header)
+
+        # Create tab widget for console and preview
+        self.console_tabs = QTabWidget()
+
+        # Console tab (log output)
+        self.console = QTextEdit()
+        self.console.setReadOnly(True)
+        self.console_tabs.addTab(self.console, "Console")
+
+        # Preview tab (file/folder structure)
+        self.preview_tree = QTreeWidget()
+        self.preview_tree.setHeaderLabels(["Name", "Type", "Size"])
+        self.preview_tree.setColumnWidth(0, 300)
+        self.preview_tree.setColumnWidth(1, 80)
+        self.console_tabs.addTab(self.preview_tree, "Preview")
+
+        console_container_layout.addWidget(self.console_tabs)
+
+        right_splitter.addWidget(console_container)
+
+        # Set 50/50 split for right pane
+        right_splitter.setStretchFactor(0, 1)
+        right_splitter.setStretchFactor(1, 1)
+
+        main_splitter.addWidget(right_splitter)
+
+        # Set 60/40 split for main layout (media tree gets more space)
+        main_splitter.setStretchFactor(0, 3)  # Tree: 60%
+        main_splitter.setStretchFactor(1, 2)  # Right pane: 40%
+
+        media_layout.addWidget(main_splitter)
+
+        return media_widget
+
+    def _create_settings_tab(self) -> QWidget:
+        """Create the settings tab with subtabs for General and Hotkeys"""
+        settings_widget = QWidget()
+        settings_layout = QVBoxLayout(settings_widget)
+        settings_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Create tab widget for settings subtabs
+        settings_tabs = QTabWidget()
+
+        # General Settings subtab
+        self.settings_panel = SettingsPanel(self.settings)
+        self.settings_panel.settings_changed.connect(self._on_settings_changed)
+        settings_tabs.addTab(self.settings_panel, "General")
+
+        # Hotkeys subtab
+        self.hotkeys_panel = HotkeysPanel(self.settings)
+        self.hotkeys_panel.settings_changed.connect(self._on_settings_changed)
+        settings_tabs.addTab(self.hotkeys_panel, "Hotkeys")
+
+        settings_layout.addWidget(settings_tabs)
+
+        return settings_widget
+
+    def _setup_keyboard_shortcuts(self):
+        """Setup keyboard shortcuts for undo/redo"""
+        # Undo: Ctrl+Z
+        undo_shortcut = QShortcut(QKeySequence.StandardKey.Undo, self)
+        undo_shortcut.activated.connect(self.undo_action)
+
+        # Redo: Ctrl+Y (Windows/Linux) or Ctrl+Shift+Z (Mac-style, also works everywhere)
+        redo_shortcut1 = QShortcut(QKeySequence.StandardKey.Redo, self)
+        redo_shortcut1.activated.connect(self.redo_action)
+
+        # Alternative redo: Ctrl+Shift+Z (works on all platforms)
+        redo_shortcut2 = QShortcut(QKeySequence("Ctrl+Shift+Z"), self)
+        redo_shortcut2.activated.connect(self.redo_action)
+
+        self.log("Keyboard shortcuts enabled: Ctrl+Z (Undo), Ctrl+Y / Ctrl+Shift+Z (Redo)")
+
+    def _create_center_toolbar(self) -> QHBoxLayout:
+        """Create center toolbar with Scan and Organize buttons"""
+        toolbar = QHBoxLayout()
+        toolbar.setSpacing(10)
+
+        # Scan button
+        self.scan_btn = QPushButton("Scan")
+        self.scan_btn.clicked.connect(self.scan_media)
+        self.scan_btn.setMinimumWidth(100)
+        toolbar.addWidget(self.scan_btn)
+
+        # Organize button (disabled by default, green when enabled)
+        self.organize_btn = QPushButton("Organize")
+        self.organize_btn.clicked.connect(self._on_organize_clicked)
+        self.organize_btn.setEnabled(False)
+        self.organize_btn.setMinimumWidth(100)
+        toolbar.addWidget(self.organize_btn)
+
+        return toolbar
+
+    def _create_right_toolbar(self) -> QHBoxLayout:
+        """Create right toolbar with Undo and Redo buttons"""
+        toolbar = QHBoxLayout()
+        toolbar.setSpacing(5)
+
+        # Undo button
+        self.undo_btn = QPushButton("Undo")
+        self.undo_btn.clicked.connect(self.undo_action)
+        self.undo_btn.setEnabled(False)
+        toolbar.addWidget(self.undo_btn)
+
+        # Redo button
+        self.redo_btn = QPushButton("Redo")
+        self.redo_btn.clicked.connect(self.redo_action)
+        self.redo_btn.setEnabled(False)
+        toolbar.addWidget(self.redo_btn)
+
+        return toolbar
+
+    def scan_media(self):
+        """Execute media scan"""
+        self.log("Starting media scan...")
+
+        # Execute scan use case
+        scan_use_case = ScanMediaUseCase(self.settings, self.log)
+        self.scan_result = scan_use_case.execute()
+
+        if self.scan_result.errors:
+            for error in self.scan_result.errors:
+                self.log(f"Error: {error}")
+            QMessageBox.warning(self, "Scan Errors", "\n".join(self.scan_result.errors))
+            return
+
+        # Populate tree
+        self._populate_tree()
+
+        # V1: Count total files instead of episodes
+        total_files = sum(getattr(s, '_v1_file_count', 0) for s in self.scan_result.series_map.values())
+        self.statusBar().showMessage(
+            f"Scan complete: {self.scan_result.total_series} folders, {total_files} files"
+        )
+
+    def _populate_tree(self):
+        """Populate media tree with scan results (V1: simple folder list)"""
+        from domain.value_objects.media_type import MediaType
+
+        self.media_tree.clear()
+
+        if not self.scan_result:
+            return
+
+        # V1: Simple folder listing (no seasons/episodes tree)
+        for folder_name, series in self.scan_result.series_map.items():
+            # Get file count if available
+            file_count = getattr(series, '_v1_file_count', 0)
+
+            # Check if media is in an organizational folder (processed)
+            # A folder is processed if it's INSIDE an org folder, not just auto-detected
+            is_processed = self._is_folder_processed(series)
+
+            # Create top-level item showing folder name, file count, and media type
+            folder_item = QTreeWidgetItem([
+                series.name,  # Raw folder name
+                f"{file_count} files",
+                series.media_type.value  # Media type
+            ])
+
+            # Add green indicator for processed media
+            if is_processed:
+                # Set green color for all columns to indicate processed
+                folder_item.setForeground(0, QColor(100, 255, 100))  # Bright green for folder name
+                folder_item.setForeground(1, QColor(150, 255, 150))  # Lighter green for file count
+                folder_item.setForeground(2, QColor(150, 255, 150))  # Lighter green for media type
+                # Add checkmark prefix to folder name
+                folder_item.setText(0, f"✓ {series.name}")
+
+            self.media_tree.addTopLevelItem(folder_item)
+
+    def _is_folder_processed(self, series: 'Series') -> bool:
+        """Check if a folder is in an organizational folder (processed)
+
+        Args:
+            series: Series object to check
+
+        Returns:
+            True if folder is inside an organizational folder, False otherwise
+        """
+        # Get the parent directory of the series folder
+        parent_dir = series.root_path.path.parent
+
+        # Check if parent directory name matches an organizational folder
+        org_folder_names = [
+            self.settings.org_folder_anime.lower(),
+            self.settings.org_folder_tv_shows.lower(),
+            self.settings.org_folder_movies.lower()
+        ]
+
+        return parent_dir.name.lower() in org_folder_names
+
+    def _on_settings_changed(self):
+        """Called when any setting is changed - auto-save"""
+        success = self.settings_repo.save(self.settings)
+        if success:
+            self.log("Settings saved automatically")
+
+        # Update file watcher if staging directory changed
+        self._update_file_watcher()
+
+    def _on_tab_changed(self, index: int):
+        """Called when user switches tabs
+
+        Args:
+            index: New tab index
+        """
+        # If switching away from settings tab, show toast
+        if self.tabs.tabText(index) != "Settings":
+            # Check if we were on settings tab before
+            Toast.show_toast(self, "Settings saved", 1500, color="#4CAF50")  # Green color
+
+    def undo_action(self):
+        """Undo last action"""
+        if self.history.undo():
+            self.log("Undo successful")
+            self._update_undo_redo_buttons()
+            self.scan_media()  # Refresh display
+        else:
+            self.log("Undo failed")
+
+    def redo_action(self):
+        """Redo last undone action"""
+        if self.history.redo():
+            self.log("Redo successful")
+            self._update_undo_redo_buttons()
+            self.scan_media()  # Refresh display
+        else:
+            self.log("Redo failed")
+
+    def _update_undo_redo_buttons(self):
+        """Update undo/redo button states"""
+        self.undo_btn.setEnabled(self.history.can_undo())
+        self.redo_btn.setEnabled(self.history.can_redo())
+
+        # Update tooltips with action descriptions
+        if self.history.can_undo():
+            self.undo_btn.setToolTip(f"Undo: {self.history.get_undo_description()}")
+        else:
+            self.undo_btn.setToolTip("Nothing to undo")
+
+        if self.history.can_redo():
+            self.redo_btn.setToolTip(f"Redo: {self.history.get_redo_description()}")
+        else:
+            self.redo_btn.setToolTip("Nothing to redo")
+
+    def _show_tree_context_menu(self, position):
+        """Show context menu for media tree
+
+        Args:
+            position: Position where right-click occurred
+        """
+        # Get selected items
+        selected_items = self.media_tree.selectedItems()
+
+        if not selected_items:
+            return
+
+        # Create context menu
+        menu = QMenu(self)
+
+        # Add "Organize" action
+        organize_action = menu.addAction("Organize...")
+        organize_action.triggered.connect(self._on_organize_requested)
+
+        # Show menu at cursor position
+        menu.exec_(self.media_tree.viewport().mapToGlobal(position))
+
+    def _on_tree_selection_changed(self):
+        """Handle tree selection change - update organize button and cleanup button"""
+        selected_items = self.media_tree.selectedItems()
+        has_selection = len(selected_items) > 0
+        selection_count = len(selected_items)
+
+        # Update organize button - Enable/disable and change color
+        self.organize_btn.setEnabled(has_selection)
+
+        # Change color to green when enabled, gray when disabled
+        if has_selection:
+            self.organize_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
+        else:
+            self.organize_btn.setStyleSheet("")  # Reset to default style
+
+        # Update cleanup button text based on selection
+        if has_selection:
+            self.cleanup_panel.update_button_text(f"Clean Selected ({selection_count})")
+        else:
+            self.cleanup_panel.update_button_text("Clean Staging Directory")
+
+        # Update preview tree
+        self._update_preview_tree(selected_items)
+
+    def _update_preview_tree(self, selected_items: List[QTreeWidgetItem]):
+        """Update preview tree with files and folder structure of selected items
+
+        Args:
+            selected_items: List of selected tree items
+        """
+        self.preview_tree.clear()
+
+        if not selected_items:
+            # Show message when nothing is selected
+            placeholder = QTreeWidgetItem(["No items selected", "", ""])
+            placeholder.setForeground(0, QColor(128, 128, 128))
+            self.preview_tree.addTopLevelItem(placeholder)
+            return
+
+        for tree_item in selected_items:
+            folder_name = tree_item.text(0)
+            # Strip the checkmark prefix if present (added to processed folders)
+            if folder_name.startswith("✓ "):
+                folder_name = folder_name[2:]  # Remove "✓ " prefix
+
+            # Find the series in scan_result
+            if not self.scan_result or folder_name not in self.scan_result.series_map:
+                continue
+
+            series = self.scan_result.series_map[folder_name]
+            root_path = series.root_path.path
+
+            # Create top-level item for this media title
+            title_item = QTreeWidgetItem([folder_name, "Folder", ""])
+            title_item.setForeground(0, QColor(255, 255, 255))
+            title_item.setForeground(1, QColor(200, 200, 200))
+            self.preview_tree.addTopLevelItem(title_item)
+
+            # Recursively add folder structure
+            self._add_folder_contents(title_item, root_path)
+
+            # Expand the top level
+            title_item.setExpanded(True)
+
+    def _add_folder_contents(self, parent_item: QTreeWidgetItem, folder_path: Path):
+        """Recursively add folder contents to preview tree
+
+        Args:
+            parent_item: Parent tree item
+            folder_path: Path to folder to add
+        """
+        try:
+            # List all entries in the folder
+            entries = sorted(folder_path.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower()))
+
+            for entry in entries:
+                if entry.is_dir():
+                    # Add folder
+                    folder_item = QTreeWidgetItem([
+                        entry.name,
+                        "Folder",
+                        ""
+                    ])
+                    folder_item.setForeground(1, QColor(150, 150, 255))
+                    parent_item.addChild(folder_item)
+
+                    # Recursively add contents
+                    self._add_folder_contents(folder_item, entry)
+
+                elif entry.is_file():
+                    # Add file with size
+                    size = entry.stat().st_size
+                    size_str = self._format_file_size(size)
+
+                    file_item = QTreeWidgetItem([
+                        entry.name,
+                        "File",
+                        size_str
+                    ])
+                    file_item.setForeground(1, QColor(200, 200, 200))
+                    file_item.setForeground(2, QColor(180, 180, 180))
+                    parent_item.addChild(file_item)
+
+        except (OSError, PermissionError):
+            pass
+
+    def _format_file_size(self, size_bytes: int) -> str:
+        """Format file size in human-readable format
+
+        Args:
+            size_bytes: Size in bytes
+
+        Returns:
+            Formatted size string (e.g., "1.5 GB")
+        """
+        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+            if size_bytes < 1024.0:
+                return f"{size_bytes:.1f} {unit}"
+            size_bytes /= 1024.0
+        return f"{size_bytes:.1f} PB"
+
+    def _on_organize_clicked(self):
+        """Handle organize button click - calls organize workflow"""
+        self._on_organize_requested()
+
+    def _on_organize_requested(self):
+        """Handle organize action from context menu - NEW WORKFLOW"""
+        selected_items = self.media_tree.selectedItems()
+
+        if not selected_items:
+            QMessageBox.information(self, "No Selection", "Please select folders to organize.")
+            return
+
+        # Get folder names and their actual paths from scan result
+        folder_paths = {}  # folder_name -> full_path
+        for item in selected_items:
+            folder_name = item.text(0)
+            # Strip the checkmark prefix if present (added to processed folders)
+            if folder_name.startswith("✓ "):
+                folder_name = folder_name[2:]  # Remove "✓ " prefix
+
+            self.log(f"DEBUG: Looking for folder: '{folder_name}'")
+
+            if self.scan_result:
+                self.log(f"DEBUG: Available folders in series_map: {list(self.scan_result.series_map.keys())}")
+
+                if folder_name in self.scan_result.series_map:
+                    series = self.scan_result.series_map[folder_name]
+                    folder_paths[folder_name] = str(series.root_path.path)
+                    self.log(f"DEBUG: Found path: {folder_paths[folder_name]}")
+                else:
+                    self.log(f"DEBUG: Folder '{folder_name}' NOT found in series_map")
+            else:
+                self.log(f"DEBUG: No scan_result available")
+
+        if not folder_paths:
+            error_msg = "Could not find paths for selected folders.\n\n"
+            error_msg += f"Selected: {[item.text(0) for item in selected_items]}\n\n"
+            if self.scan_result:
+                error_msg += f"Available: {list(self.scan_result.series_map.keys())}"
+            QMessageBox.warning(self, "Error", error_msg)
+            return
+
+        self.log(f"Organize requested for {len(folder_paths)} folder(s)")
+
+        # Step 1: Show media type selection dialog
+        media_type_dialog = MediaTypeDialog(self, len(folder_paths))
+
+        if media_type_dialog.exec_() != MediaTypeDialog.Accepted:
+            self.log("Organize cancelled - no media type selected")
+            return
+
+        media_type = media_type_dialog.get_selected_type()
+        self.log(f"Media type selected: {media_type}")
+
+        # Step 2: Route to appropriate organize dialog
+        if media_type_dialog.should_use_series_dialog():
+            # TV Series, Anime, or Anime Movies → Series Organize Dialog
+            self._show_series_organize_dialog(folder_paths, media_type)
+        elif media_type_dialog.should_use_movies_dialog():
+            # Movies → Movies Organize Dialog
+            self._show_movies_organize_dialog(folder_paths, media_type)
+
+    def _show_series_organize_dialog(self, folder_paths: Dict[str, str], media_type: str):
+        """Show series organize dialog (3-pane)
+
+        Args:
+            folder_paths: Dict mapping folder names to full paths
+            media_type: Media type string
+        """
+        series_dialog = SeriesOrganizeDialog(self, folder_paths, self.settings, media_type)
+
+        if series_dialog.exec_() != SeriesOrganizeDialog.Accepted:
+            self.log("Organize cancelled")
+            return
+
+        # Get organize operations from dialog
+        operations = series_dialog.get_organize_operations()
+        media_title = series_dialog.media_title
+
+        self.log(f"Organizing '{media_title}' with {len(operations['seasons'])} season(s)")
+
+        # Execute the organize operations
+        self._execute_series_organize(operations, media_title, media_type)
+
+    def _execute_series_organize(self, operations: Dict, media_title: str, media_type: str):
+        """Execute series organize operations within staging directory
+
+        Reorganizes files within staging into proper folder structure.
+        Files stay in staging - they are not moved to library directories.
+
+        Args:
+            operations: Dictionary with seasons and file_renames
+            media_title: Series title (e.g., "My Hero Academia")
+            media_type: Media type (from MediaTypeDialog: "tv_series" or "anime")
+        """
+        import shutil
+        from infrastructure.services.history_service import HistoryAction, ActionType
+        from infrastructure.services.file_system_service import MoveOperation
+
+        # Check staging directory is configured
+        if not self.settings.directories.staging:
+            QMessageBox.warning(
+                self,
+                "Staging Not Configured",
+                "Please configure the staging directory in Settings."
+            )
+            return
+
+        staging_path = Path(self.settings.directories.staging)
+
+        # Determine media type folder name from settings
+        if media_type == "tv_series":
+            media_type_folder = self.settings.org_folder_tv_shows
+        elif media_type == "anime":
+            media_type_folder = self.settings.org_folder_anime
+        elif media_type == "movies":
+            media_type_folder = self.settings.org_folder_movies
+        else:
+            media_type_folder = self.settings.org_folder_tv_shows
+
+        # Create series folder within staging/media_type/
+        series_folder = staging_path / media_type_folder / media_title
+        try:
+            series_folder.mkdir(parents=True, exist_ok=True)
+            self.log(f"Created series folder in staging: {series_folder}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to create series folder: {e}")
+            return
+
+        # Track all source folders for cleanup
+        source_folders_to_check = set()
+
+        # Collect all move operations for history tracking
+        move_operations = []
+
+        # Process each season
+        files_moved = 0
+        errors = []
+
+        for season_num, season_data in operations["seasons"].items():
+            folder_name = season_data["folder_name"]  # e.g., "Season 1", "Specials"
+            files = season_data["files"]
+
+            # Create season folder
+            season_folder = series_folder / folder_name
+            try:
+                season_folder.mkdir(parents=True, exist_ok=True)
+                self.log(f"Created season folder: {season_folder}")
+            except Exception as e:
+                errors.append(f"Failed to create {season_folder}: {e}")
+                continue
+
+            # Move each file
+            for file_info in files:
+                original_path = Path(file_info["original_path"])
+                new_name = file_info["new_name"]
+
+                # For movies, create subfolder for each movie (folder = movie title without extension)
+                if folder_name == "Movies":
+                    movie_title = Path(new_name).stem  # Get filename without extension
+                    movie_folder = season_folder / movie_title
+                    try:
+                        movie_folder.mkdir(parents=True, exist_ok=True)
+                    except Exception as e:
+                        errors.append(f"Failed to create movie folder {movie_title}: {e}")
+                        continue
+                    target_path = movie_folder / new_name
+                else:
+                    # For regular seasons, put files directly in season folder
+                    target_path = season_folder / new_name
+
+                # Track source folder for cleanup
+                source_folders_to_check.add(original_path.parent)
+
+                try:
+                    # Move and rename file
+                    shutil.move(str(original_path), str(target_path))
+                    self.log(f"Moved: {original_path.name} → {target_path}")
+                    files_moved += 1
+
+                    # Record move operation for undo
+                    move_operations.append(MoveOperation(
+                        source=FilePath(str(original_path)),
+                        destination=FilePath(str(target_path))
+                    ))
+
+                except Exception as e:
+                    errors.append(f"Failed to move {original_path.name}: {e}")
+
+        # Remove non-media files from source folders
+        non_media_removed = self._cleanup_non_media_files(source_folders_to_check)
+
+        # Clean up empty source folders
+        self._cleanup_empty_folders(source_folders_to_check, staging_path)
+
+        # Record organize action in history for undo/redo (only if files were moved)
+        if move_operations:
+            history_action = HistoryAction(
+                description=f"Organize '{media_title}' ({len(move_operations)} files)",
+                action_type=ActionType.ORGANIZE,
+                operations=move_operations
+            )
+            # Add to history without re-executing (we already moved the files)
+            self.history.history.append(history_action)
+            self.history.current_position = len(self.history.history) - 1
+            self.log(f"Recorded organize action in history: {history_action.description}")
+
+        # Show results
+        if errors:
+            error_msg = f"Organized {files_moved} file(s) with errors:\n\n" + "\n".join(errors[:10])
+            if len(errors) > 10:
+                error_msg += f"\n... and {len(errors) - 10} more errors"
+            QMessageBox.warning(self, "Organize Complete with Errors", error_msg)
+        else:
+            if self.settings.show_organize_confirmation:
+                success_msg = f"Successfully organized {files_moved} file(s) in staging:\n{series_folder}"
+                if non_media_removed > 0:
+                    success_msg += f"\n\nRemoved {non_media_removed} non-media file(s)"
+                success_msg += "\n\nFiles remain in staging and can now be moved to library using the Move tool."
+                QMessageBox.information(self, "Organize Complete", success_msg)
+
+        # Update undo/redo buttons
+        self._update_undo_redo_buttons()
+
+        # Refresh tree to show updated staging directory
+        self.scan_media()
+
+    def _show_movies_organize_dialog(self, folder_paths: Dict[str, str], media_type: str):
+        """Show movies organize dialog
+
+        Args:
+            folder_paths: Dict mapping folder names to full paths
+            media_type: Media type string
+        """
+        movies_dialog = MoviesOrganizeDialog(self, folder_paths, self.settings, media_type)
+
+        if movies_dialog.exec_() != MoviesOrganizeDialog.Accepted:
+            self.log("Organize cancelled")
+            return
+
+        # Get organize operations from dialog
+        operations = movies_dialog.get_organize_operations()
+
+        # Log
+        movie_count = len(operations["movies"])
+        self.log(f"Organizing {movie_count} movie(s)")
+
+        # Execute the organize operations
+        self._execute_movies_organize(operations, media_type)
+
+    def _execute_movies_organize(self, operations: Dict, media_type: str):
+        """Execute movies organize operations within staging directory
+
+        Args:
+            operations: Dictionary with movies list and non_media_files
+            media_type: Media type (movies)
+        """
+        import shutil
+        from infrastructure.services.history_service import HistoryAction, ActionType
+        from infrastructure.services.file_system_service import MoveOperation
+
+        # Check staging directory is configured
+        if not self.settings.directories.staging:
+            QMessageBox.warning(
+                self,
+                "Staging Not Configured",
+                "Please configure the staging directory in Settings."
+            )
+            return
+
+        staging_path = Path(self.settings.directories.staging)
+
+        # Determine media type folder name from settings
+        media_type_folder = self.settings.org_folder_movies
+
+        # Track all source folders for cleanup
+        source_folders_to_check = set()
+
+        # Collect all move operations for history tracking
+        move_operations = []
+
+        # Process each movie
+        files_moved = 0
+        errors = []
+        movies_created = set()  # Track unique movie folders created
+
+        for movie_info in operations["movies"]:
+            original_path = Path(movie_info["original_path"])
+            movie_title = movie_info["movie_title"]
+            new_name = movie_info["new_name"]
+
+            # Create movie folder within staging/movies/
+            movie_folder = staging_path / media_type_folder / movie_title
+
+            try:
+                movie_folder.mkdir(parents=True, exist_ok=True)
+                if movie_title not in movies_created:
+                    self.log(f"Created movie folder in staging: {movie_folder}")
+                    movies_created.add(movie_title)
+            except Exception as e:
+                errors.append(f"Failed to create folder for {movie_title}: {e}")
+                continue
+
+            target_path = movie_folder / new_name
+
+            # Track source folder for cleanup
+            source_folders_to_check.add(original_path.parent)
+
+            try:
+                # Move and rename file
+                shutil.move(str(original_path), str(target_path))
+                self.log(f"Moved: {original_path.name} → {target_path}")
+                files_moved += 1
+
+                # Record move operation for undo
+                move_operations.append(MoveOperation(
+                    source=FilePath(str(original_path)),
+                    destination=FilePath(str(target_path))
+                ))
+
+            except Exception as e:
+                errors.append(f"Failed to move {original_path.name}: {e}")
+
+        # Remove non-media files
+        non_media_removed = 0
+        for file_path in operations["non_media_files"]:
+            try:
+                Path(file_path).unlink()
+                self.log(f"Removed non-media file: {Path(file_path).name}")
+                non_media_removed += 1
+            except Exception as e:
+                self.log(f"Could not remove {Path(file_path).name}: {e}")
+
+        # Clean up empty source folders
+        self._cleanup_empty_folders(source_folders_to_check, staging_path)
+
+        # Record organize action in history for undo/redo (only if files were moved)
+        if move_operations:
+            movie_count = len(movies_created)
+            history_action = HistoryAction(
+                description=f"Organize {movie_count} movie(s) ({len(move_operations)} files)",
+                action_type=ActionType.ORGANIZE,
+                operations=move_operations
+            )
+            # Add to history without re-executing (we already moved the files)
+            self.history.history.append(history_action)
+            self.history.current_position = len(self.history.history) - 1
+            self.log(f"Recorded organize action in history: {history_action.description}")
+
+        # Show results
+        if errors:
+            error_msg = f"Organized {files_moved} file(s) with errors:\n\n" + "\n".join(errors[:10])
+            if len(errors) > 10:
+                error_msg += f"\n... and {len(errors) - 10} more errors"
+            QMessageBox.warning(self, "Organize Complete with Errors", error_msg)
+        else:
+            if self.settings.show_organize_confirmation:
+                movie_count = len(movies_created)
+                success_msg = f"Successfully organized {files_moved} file(s) into {movie_count} movie(s) in staging"
+
+                if non_media_removed > 0:
+                    success_msg += f"\n\nRemoved {non_media_removed} non-media file(s)"
+                success_msg += "\n\nFiles remain in staging and can now be moved to library using the Move tool."
+                QMessageBox.information(self, "Organize Complete", success_msg)
+
+        # Update undo/redo buttons
+        self._update_undo_redo_buttons()
+
+        # Refresh tree to show updated staging directory
+        self.scan_media()
+
+    def _cleanup_non_media_files(self, folders: set) -> int:
+        """Remove non-media files from folders
+
+        Args:
+            folders: Set of folder paths to clean
+
+        Returns:
+            Number of non-media files removed
+        """
+        VIDEO_EXTENSIONS = {
+            '.mkv', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm',
+            '.m4v', '.mpg', '.mpeg', '.3gp', '.ogv', '.ts'
+        }
+
+        removed_count = 0
+
+        for folder in folders:
+            try:
+                folder_path = Path(folder)
+                if not folder_path.exists() or not folder_path.is_dir():
+                    continue
+
+                # Find all files in this folder (not recursive, just direct children)
+                for file_path in folder_path.iterdir():
+                    if file_path.is_file():
+                        ext = file_path.suffix.lower()
+                        if ext not in VIDEO_EXTENSIONS:
+                            # Non-media file - remove it
+                            try:
+                                file_path.unlink()
+                                self.log(f"Removed non-media file: {file_path.name}")
+                                removed_count += 1
+                            except Exception as e:
+                                self.log(f"Could not remove {file_path.name}: {e}")
+
+            except (OSError, PermissionError) as e:
+                self.log(f"Could not access folder {folder}: {e}")
+
+        return removed_count
+
+    def _cleanup_empty_folders(self, folders: set, staging_path: Path):
+        """Clean up empty folders in staging
+
+        Args:
+            folders: Set of folder paths to check
+            staging_path: Staging directory path
+        """
+        for folder in sorted(folders, reverse=True):  # Reverse to delete deepest first
+            try:
+                folder_path = Path(folder)
+
+                # Only clean folders within staging
+                if not str(folder_path).startswith(str(staging_path)):
+                    continue
+
+                # Check if folder is empty
+                if folder_path.exists() and folder_path.is_dir():
+                    if not any(folder_path.iterdir()):  # Empty
+                        folder_path.rmdir()
+                        self.log(f"Removed empty folder: {folder_path}")
+                    else:
+                        # Check if it only contains empty subfolders
+                        all_empty = True
+                        for item in folder_path.iterdir():
+                            if item.is_file() or (item.is_dir() and any(item.iterdir())):
+                                all_empty = False
+                                break
+
+                        if all_empty:
+                            # Remove empty subfolders first
+                            for subfolder in folder_path.iterdir():
+                                if subfolder.is_dir():
+                                    subfolder.rmdir()
+                            # Then remove parent
+                            folder_path.rmdir()
+                            self.log(f"Removed empty folder tree: {folder_path}")
+
+            except Exception as e:
+                self.log(f"Could not remove folder {folder}: {e}")
+
+    def _execute_organize(self, folder_names: List[str], target_dir: str):
+        """Execute organize operation
+
+        Args:
+            folder_names: List of folder names to organize
+            target_dir: Target directory path
+        """
+        if not self.settings.directories.staging:
+            QMessageBox.warning(self, "Error", "Staging directory not configured.")
+            return
+
+        self.log(f"Organizing {len(folder_names)} folder(s) to {target_dir}...")
+
+        # Create and execute use case
+        organize_use_case = OrganizeFoldersUseCase(
+            staging_dir=self.settings.directories.staging,
+            file_system=self.file_system,
+            history=self.history,
+            logger=self.log
+        )
+
+        result = organize_use_case.execute(folder_names, target_dir)
+
+        # Handle result
+        if result["success"]:
+            folders_moved = result.get("folders_moved", 0)
+            message = f"Successfully organized {folders_moved} folder(s) to {target_dir}"
+
+            if result.get("not_found"):
+                message += f"\n\nWarning: {len(result['not_found'])} folder(s) not found in staging"
+
+            QMessageBox.information(self, "Success", message)
+
+            # Update undo/redo buttons
+            self._update_undo_redo_buttons()
+
+            # Refresh tree
+            self.scan_media()
+        else:
+            error_msg = result.get("error", "Unknown error")
+
+            if result.get("conflicts"):
+                conflicts = result["conflicts"]
+                error_msg += f"\n\nConflicting folders:\n" + "\n".join(f"  • {name}" for name in conflicts[:10])
+                if len(conflicts) > 10:
+                    error_msg += f"\n  ... and {len(conflicts) - 10} more"
+
+            QMessageBox.warning(self, "Organize Failed", error_msg)
+
+    def _on_cleanup_requested(self, extensions: set, custom_patterns: list):
+        """Handle cleanup request from cleanup panel
+
+        Args:
+            extensions: Set of file extensions to clean
+            custom_patterns: List of custom patterns (not used yet)
+        """
+        self.log(f"Cleanup requested for extensions: {', '.join(sorted(extensions))}")
+
+        # Get selected series (if any)
+        selected_items = self.media_tree.selectedItems()
+        target_paths = []
+
+        if selected_items:
+            # Clean only selected series
+            for item in selected_items:
+                # Only process top-level items (series)
+                if item.parent() is None:
+                    series_name = item.text(0)
+                    # Strip the checkmark prefix if present (added to processed folders)
+                    if series_name.startswith("✓ "):
+                        series_name = series_name[2:]  # Remove "✓ " prefix
+
+                    if self.scan_result and series_name in self.scan_result.series_map:
+                        series = self.scan_result.series_map[series_name]
+                        target_paths.append(series.root_path)
+
+            scope = f"{len(target_paths)} selected series"
+        else:
+            # Clean entire staging directory
+            scope = "entire staging directory"
+
+        # Check for sample files - if any extension contains "sample", show preview
+        has_sample_pattern = any('sample' in ext.lower() for ext in extensions)
+
+        if has_sample_pattern:
+            # Scan for sample files first
+            sample_files = self._find_sample_files(target_paths if target_paths else None)
+
+            if sample_files:
+                # Show preview dialog
+                if not self._show_sample_preview_dialog(sample_files):
+                    self.log("Cleanup cancelled by user after preview")
+                    return
+            else:
+                self.log("No sample files found matching the patterns")
+                QMessageBox.information(
+                    self,
+                    "No Sample Files Found",
+                    "No sample files were found matching the selected patterns."
+                )
+                return
+        else:
+            # Normal confirmation for non-sample cleanups
+            reply = QMessageBox.question(
+                self,
+                "Confirm Cleanup",
+                f"Clean {scope} for extensions:\n{', '.join(sorted(extensions))}\n\n"
+                f"Files will be moved to trash (if configured) or deleted permanently.\n\n"
+                f"Continue?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+
+            if reply != QMessageBox.Yes:
+                self.log("Cleanup cancelled by user")
+                return
+
+        # Execute cleanup
+        cleanup_use_case = CleanupFilesUseCase(
+            self.settings,
+            self.file_system,
+            self.history,
+            self.log
+        )
+
+        result = cleanup_use_case.execute(
+            extensions=extensions,
+            target_paths=target_paths if target_paths else None,
+            use_trash=bool(self.settings.directories.trash)
+        )
+
+        if result.get("success"):
+            files_cleaned = result.get("files_cleaned", 0)
+            method = result.get("method", "unknown")
+            self.log(f"Cleanup complete: {files_cleaned} files ({method})")
+            QMessageBox.information(
+                self,
+                "Cleanup Complete",
+                f"Successfully cleaned {files_cleaned} files"
+            )
+
+            # Update undo/redo buttons
+            self._update_undo_redo_buttons()
+
+            # Refresh tree
+            self.scan_media()
+        else:
+            error = result.get("error", "Unknown error")
+            self.log(f"Cleanup failed: {error}")
+            QMessageBox.warning(self, "Cleanup Failed", error)
+
+    def _find_sample_files(self, target_paths: Optional[List] = None) -> List[Path]:
+        """Find all sample files in target paths or staging directory
+
+        Args:
+            target_paths: Optional list of specific paths to search. If None, searches staging.
+
+        Returns:
+            List of Path objects for sample files
+        """
+        sample_files = []
+
+        if target_paths:
+            # Search in specific paths
+            search_paths = target_paths
+        else:
+            # Search entire staging directory
+            if not self.settings.directories.staging:
+                return []
+            search_paths = [Path(self.settings.directories.staging)]
+
+        # Search for files containing "sample" in their name
+        for search_path in search_paths:
+            if isinstance(search_path, str):
+                search_path = Path(search_path)
+
+            if not search_path.exists():
+                continue
+
+            # Walk through directory recursively
+            for file_path in search_path.rglob('*'):
+                if file_path.is_file() and 'sample' in file_path.name.lower():
+                    sample_files.append(file_path)
+
+        return sorted(sample_files)
+
+    def _show_sample_preview_dialog(self, sample_files: List[Path]) -> bool:
+        """Show preview dialog for sample files before cleanup
+
+        Args:
+            sample_files: List of sample file paths
+
+        Returns:
+            True if user confirms deletion, False otherwise
+        """
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QListWidget, QDialogButtonBox, QLabel
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Sample Files Preview")
+        dialog.setMinimumWidth(600)
+        dialog.setMinimumHeight(400)
+
+        layout = QVBoxLayout(dialog)
+
+        # Header
+        header = QLabel(f"Found {len(sample_files)} sample file(s) to delete:")
+        header.setStyleSheet("font-weight: bold; font-size: 12pt; padding: 10px;")
+        layout.addWidget(header)
+
+        # List widget
+        file_list = QListWidget()
+        for file_path in sample_files:
+            # Show relative path from staging if possible
+            try:
+                if self.settings.directories.staging:
+                    rel_path = file_path.relative_to(self.settings.directories.staging)
+                    display_path = str(rel_path)
+                else:
+                    display_path = str(file_path)
+            except ValueError:
+                display_path = str(file_path)
+
+            file_list.addItem(display_path)
+
+        layout.addWidget(file_list)
+
+        # Warning label
+        warning = QLabel("These files will be moved to trash or deleted permanently.")
+        warning.setStyleSheet("color: #d9534f; padding: 10px;")
+        layout.addWidget(warning)
+
+        # Buttons
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+
+        # Show dialog and return result
+        result = dialog.exec()
+        return result == QDialog.Accepted
+
+    def log(self, message: str):
+        """Log message to console"""
+        self.console.append(message)
+        print(message)  # Also print to stdout
+
+    def closeEvent(self, event):
+        """Handle window close event"""
+        # Save cleanup panel settings
+        self.settings.cleanup_ext_states = self.cleanup_panel.save_settings()
+
+        # Save settings before closing
+        self.settings_repo.save(self.settings)
+        event.accept()
+
+    def _setup_file_watcher(self):
+        """Setup file system watcher for staging directory"""
+        if not self.settings.directories.staging:
+            # No staging directory configured yet
+            self.file_watcher = None
+            return
+
+        self.file_watcher = QFileSystemWatcher()
+
+        # Watch the staging directory
+        staging_path = self.settings.directories.staging
+        if staging_path:
+            self.file_watcher.addPath(staging_path)
+            self.log(f"Monitoring staging directory: {staging_path}")
+
+        # Connect directory changed signal to refresh handler
+        self.file_watcher.directoryChanged.connect(self._on_staging_changed)
+
+    def _update_file_watcher(self):
+        """Update file watcher when staging directory changes"""
+        new_staging = self.settings.directories.staging
+
+        # Remove old watcher if exists
+        if hasattr(self, 'file_watcher') and self.file_watcher:
+            # Get currently watched directories
+            old_dirs = self.file_watcher.directories()
+            if old_dirs:
+                self.file_watcher.removePaths(old_dirs)
+
+        # If no new staging directory, stop watching
+        if not new_staging:
+            return
+
+        # Create new watcher if needed
+        if not hasattr(self, 'file_watcher') or not self.file_watcher:
+            self.file_watcher = QFileSystemWatcher()
+            self.file_watcher.directoryChanged.connect(self._on_staging_changed)
+
+        # Add new path
+        self.file_watcher.addPath(new_staging)
+        self.log(f"Now monitoring staging directory: {new_staging}")
+
+    def _on_staging_changed(self, path: str):
+        """Handle changes in staging directory
+
+        Args:
+            path: Path that changed
+        """
+        self.log(f"Staging directory changed, refreshing...")
+
+        # Use a timer to debounce rapid changes (e.g., multiple files copied at once)
+        if hasattr(self, '_refresh_timer'):
+            self._refresh_timer.stop()
+
+        self._refresh_timer = QTimer()
+        self._refresh_timer.setSingleShot(True)
+        self._refresh_timer.timeout.connect(self.scan_media)
+        self._refresh_timer.start(1000)  # Wait 1 second after last change
+
+    def _initial_scan(self):
+        """Perform initial scan on application launch"""
+        if self.settings.directories.staging:
+            self.log("Performing initial scan...")
+            self.scan_media()
+        else:
+            self.log("No staging directory configured. Please configure in Settings.")
