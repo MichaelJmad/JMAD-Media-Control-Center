@@ -13,16 +13,18 @@ class CleanupCommand(Command):
     and can restore them from trash.
     """
 
-    def __init__(self, removed_files: List[str], trash_dir: Path):
+    def __init__(self, removed_files: List[str], trash_dir: Path, removed_dirs: List[str] = None):
         """Initialize cleanup command
 
         Args:
             removed_files: List of file paths that were removed
             trash_dir: Directory where files were moved (trash)
+            removed_dirs: List of directory paths that were removed (optional)
         """
         super().__init__()
         self.removed_files = removed_files
         self.trash_dir = Path(trash_dir)
+        self.removed_dirs = removed_dirs or []
         self._executed = False
         # Map original path to trash path
         self._file_mapping: Dict[str, str] = {}
@@ -56,7 +58,7 @@ class CleanupCommand(Command):
         return True
 
     def undo(self) -> bool:
-        """Undo cleanup operations by restoring files from trash
+        """Undo cleanup operations by restoring files from trash and recreating directories
 
         Returns:
             True if successful, False otherwise
@@ -66,6 +68,8 @@ class CleanupCommand(Command):
 
         try:
             restored_count = 0
+
+            # Restore files first
             for original_path, trash_path in self._file_mapping.items():
                 trash_file = Path(trash_path)
                 original_file = Path(original_path)
@@ -90,11 +94,21 @@ class CleanupCommand(Command):
                 print(f"Restored from trash: {original_file.name}")
                 restored_count += 1
 
-            if restored_count > 0:
+            # Recreate removed directories (in reverse order, so parent dirs are created last)
+            for dir_path in reversed(self.removed_dirs):
+                try:
+                    dir_to_restore = Path(dir_path)
+                    if not dir_to_restore.exists():
+                        dir_to_restore.mkdir(parents=True, exist_ok=True)
+                        print(f"Recreated directory: {dir_to_restore.name}")
+                except Exception as e:
+                    print(f"Failed to recreate directory {dir_path}: {e}")
+
+            if restored_count > 0 or self.removed_dirs:
                 self._executed = False
                 return True
             else:
-                print("No files could be restored")
+                print("No files or directories could be restored")
                 return False
 
         except Exception as e:
@@ -108,7 +122,12 @@ class CleanupCommand(Command):
             Human-readable description
         """
         file_count = len(self.removed_files)
-        return f"Clean up {file_count} file(s)"
+        dir_count = len(self.removed_dirs)
+
+        if dir_count > 0:
+            return f"Clean up {file_count} file(s) and {dir_count} folder(s)"
+        else:
+            return f"Clean up {file_count} file(s)"
 
     def get_file_count(self) -> int:
         """Get number of files affected

@@ -14,7 +14,7 @@ class CleanupPanel(QWidget):
     """Panel for configuring and running file cleanup"""
 
     # Signal emitted when cleanup is requested
-    cleanup_requested = Signal(set, list)  # extensions: Set[str], custom_patterns: List[str]
+    cleanup_requested = Signal(set, list, bool)  # extensions: Set[str], custom_patterns: List[str], remove_empty_folders: bool
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -66,6 +66,12 @@ class CleanupPanel(QWidget):
                 row += 1
 
         layout.addWidget(extensions_group)
+
+        # Empty folders checkbox
+        self.empty_folders_cb = QCheckBox("Remove Empty Folders")
+        self.empty_folders_cb.setChecked(False)
+        self.empty_folders_cb.setToolTip("Remove directories that contain no files after cleanup")
+        layout.addWidget(self.empty_folders_cb)
 
         # Custom patterns group
         custom_group = QGroupBox("Custom Extensions (comma-separated)")
@@ -139,17 +145,19 @@ class CleanupPanel(QWidget):
                     ext = '.' + ext
                 selected_extensions.add(ext)
 
-        # Check if anything is selected
-        if not selected_extensions:
+        # Check if anything is selected (extensions or empty folders)
+        remove_empty_folders = self.empty_folders_cb.isChecked()
+
+        if not selected_extensions and not remove_empty_folders:
             QMessageBox.warning(
                 self,
-                "No Extensions Selected",
-                "Please select at least one file extension or enter custom extensions."
+                "No Options Selected",
+                "Please select at least one file extension or enable 'Remove Empty Folders'."
             )
             return
 
-        # Emit signal with selected extensions
-        self.cleanup_requested.emit(selected_extensions, [])
+        # Emit signal with selected extensions and empty folders option
+        self.cleanup_requested.emit(selected_extensions, [], remove_empty_folders)
 
     def get_selected_extensions(self) -> Set[str]:
         """Get currently selected extensions
@@ -194,7 +202,7 @@ class CleanupPanel(QWidget):
         """Load cleanup settings from saved state
 
         Args:
-            cleanup_states: Dictionary with 'selected' list and 'custom_exts_str'
+            cleanup_states: Dictionary with 'selected' list, 'custom_exts_str', and 'remove_empty_folders'
         """
         # Get selected extensions list
         selected_exts = set(cleanup_states.get("selected", []))
@@ -216,11 +224,15 @@ class CleanupPanel(QWidget):
         if custom_exts_str:
             self.custom_entry.setPlainText(custom_exts_str)
 
+        # Load empty folders setting
+        remove_empty_folders = cleanup_states.get("remove_empty_folders", False)
+        self.empty_folders_cb.setChecked(remove_empty_folders)
+
     def save_settings(self) -> dict:
         """Save current cleanup settings to dictionary
 
         Returns:
-            Dictionary with 'selected' list and 'custom_exts_str'
+            Dictionary with 'selected' list, 'custom_exts_str', and 'remove_empty_folders'
         """
         # Collect selected extensions
         selected_extensions = []
@@ -232,7 +244,11 @@ class CleanupPanel(QWidget):
         # Get custom extensions text
         custom_exts_str = self.custom_entry.toPlainText().strip()
 
+        # Get empty folders setting
+        remove_empty_folders = self.empty_folders_cb.isChecked()
+
         return {
             "selected": selected_extensions,
-            "custom_exts_str": custom_exts_str
+            "custom_exts_str": custom_exts_str,
+            "remove_empty_folders": remove_empty_folders
         }

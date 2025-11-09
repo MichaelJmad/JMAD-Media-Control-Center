@@ -8,16 +8,19 @@ from PySide6.QtCore import Qt, QFileSystemWatcher, QTimer
 from PySide6.QtGui import QColor, QShortcut, QKeySequence
 from typing import Optional, List, Dict
 from pathlib import Path
+import os
 
 from config.settings import Settings
 from infrastructure.repositories.settings_repository import SettingsRepository
 from infrastructure.services.file_system_service import FileSystemService
 from infrastructure.services.history_service import HistoryService
+from infrastructure.services.undo_redo_manager import UndoRedoManager
 from infrastructure.parsers.fluff_parser import FluffParser
 from application.use_cases.scan_media import ScanMediaUseCase
 from application.use_cases.cleanup_files import CleanupFilesUseCase
 from application.use_cases.move_series import MoveSeriesUseCase
 from application.use_cases.organize_folders import OrganizeFoldersUseCase
+from application.commands.cleanup_command import CleanupCommand
 from presentation.widgets.cleanup_panel import CleanupPanel
 from presentation.widgets.settings_panel import SettingsPanel
 from presentation.widgets.hotkeys_panel import HotkeysPanel
@@ -40,6 +43,7 @@ class MainWindow(QMainWindow):
         self.settings = self.settings_repo.load()
         self.file_system = FileSystemService()
         self.history = HistoryService(self.file_system, self.log)
+        self.undo_redo_manager = UndoRedoManager()
 
         # Current scan result
         self.scan_result = None
@@ -52,6 +56,9 @@ class MainWindow(QMainWindow):
 
         # Setup keyboard shortcuts for undo/redo
         self._setup_keyboard_shortcuts()
+
+        # Connect UndoRedoManager signals
+        self._connect_undo_redo_signals()
 
         # Setup file system watcher for staging directory
         self._setup_file_watcher()
@@ -388,34 +395,60 @@ class MainWindow(QMainWindow):
 
     def undo_action(self):
         """Undo last action"""
-        if self.history.undo():
-            self.log("Undo successful")
-            self._update_undo_redo_buttons()
-            self.scan_media()  # Refresh display
-        else:
-            self.log("Undo failed")
+        # Try UndoRedoManager first (for cleanup operations)
+        if self.undo_redo_manager.can_undo():
+            if self.undo_redo_manager.undo():
+                self.log("Undo successful")
+                self.scan_media()  # Refresh display
+                return
+        # Fall back to HistoryService (for organize operations)
+        elif self.history.can_undo():
+            if self.history.undo():
+                self.log("Undo successful")
+                self._update_undo_redo_buttons()
+                self.scan_media()  # Refresh display
+                return
+
+        self.log("Undo failed")
 
     def redo_action(self):
         """Redo last undone action"""
-        if self.history.redo():
-            self.log("Redo successful")
-            self._update_undo_redo_buttons()
-            self.scan_media()  # Refresh display
-        else:
-            self.log("Redo failed")
+        # Try UndoRedoManager first (for cleanup operations)
+        if self.undo_redo_manager.can_redo():
+            if self.undo_redo_manager.redo():
+                self.log("Redo successful")
+                self.scan_media()  # Refresh display
+                return
+        # Fall back to HistoryService (for organize operations)
+        elif self.history.can_redo():
+            if self.history.redo():
+                self.log("Redo successful")
+                self._update_undo_redo_buttons()
+                self.scan_media()  # Refresh display
+                return
+
+        self.log("Redo failed")
 
     def _update_undo_redo_buttons(self):
         """Update undo/redo button states"""
-        self.undo_btn.setEnabled(self.history.can_undo())
-        self.redo_btn.setEnabled(self.history.can_redo())
+        # Check both undo/redo systems
+        can_undo = self.undo_redo_manager.can_undo() or self.history.can_undo()
+        can_redo = self.undo_redo_manager.can_redo() or self.history.can_redo()
 
-        # Update tooltips with action descriptions
-        if self.history.can_undo():
+        self.undo_btn.setEnabled(can_undo)
+        self.redo_btn.setEnabled(can_redo)
+
+        # Update tooltips with action descriptions (prioritize UndoRedoManager)
+        if self.undo_redo_manager.can_undo():
+            self.undo_btn.setToolTip(f"Undo: {self.undo_redo_manager.get_undo_description()}")
+        elif self.history.can_undo():
             self.undo_btn.setToolTip(f"Undo: {self.history.get_undo_description()}")
         else:
             self.undo_btn.setToolTip("Nothing to undo")
 
-        if self.history.can_redo():
+        if self.undo_redo_manager.can_redo():
+            self.redo_btn.setToolTip(f"Redo: {self.undo_redo_manager.get_redo_description()}")
+        elif self.history.can_redo():
             self.redo_btn.setToolTip(f"Redo: {self.history.get_redo_description()}")
         else:
             self.redo_btn.setToolTip("Nothing to redo")
@@ -1063,12 +1096,13 @@ class MainWindow(QMainWindow):
 
             QMessageBox.warning(self, "Organize Failed", error_msg)
 
-    def _on_cleanup_requested(self, extensions: set, custom_patterns: list):
+    def _on_cleanup_requested(self, extensions: set, custom_patterns: list, remove_empty_folders: bool):
         """Handle cleanup request from cleanup panel
 
         Args:
             extensions: Set of file extensions to clean
             custom_patterns: List of custom patterns (not used yet)
+            remove_empty_folders: Whether to remove empty folders after cleanup
         """
         self.log(f"Cleanup requested for extensions: {', '.join(sorted(extensions))}")
 
@@ -1131,39 +1165,102 @@ class MainWindow(QMainWindow):
                 self.log("Cleanup cancelled by user")
                 return
 
-        # Execute cleanup
-        cleanup_use_case = CleanupFilesUseCase(
-            self.settings,
-            self.file_system,
-            self.history,
-            self.log
-        )
+        # Execute cleanup with UndoRedoManager
+        # Get trash directory
+        trash_dir = self.settings.directories.trash
+        if not trash_dir:
+            QMessageBox.warning(
+                self,
+                "No Trash Directory",
+                "Trash directory is not configured. Please set it in Settings."
+            )
+            return
 
-        result = cleanup_use_case.execute(
-            extensions=extensions,
-            target_paths=target_paths if target_paths else None,
-            use_trash=bool(self.settings.directories.trash)
-        )
+        trash_path = Path(trash_dir)
+        if not trash_path.exists():
+            trash_path.mkdir(parents=True, exist_ok=True)
 
-        if result.get("success"):
-            files_cleaned = result.get("files_cleaned", 0)
-            method = result.get("method", "unknown")
-            self.log(f"Cleanup complete: {files_cleaned} files ({method})")
+        # Scan for files to clean
+        if not target_paths:
+            staging = self.settings.directories.staging
+            if not staging:
+                QMessageBox.warning(self, "Error", "No staging directory configured")
+                return
+            target_paths = [FilePath(staging)]
+
+        files_to_clean = []
+        for path in target_paths:
+            if not path.exists():
+                continue
+            found = self.file_system.scan_directory(path, extensions)
+            files_to_clean.extend(found)
+
+        if not files_to_clean:
+            self.log(f"No files found with extensions: {', '.join(sorted(extensions))}")
+            QMessageBox.information(
+                self,
+                "No Files Found",
+                "No files matching the selected extensions were found."
+            )
+            return
+
+        # Move files to trash
+        from infrastructure.services.file_system_service import MoveOperation
+        operations = []
+        root_path = target_paths[0]
+
+        for file_path in files_to_clean:
+            # Calculate relative path from root
+            relative = file_path.relative_to(root_path)
+            if relative:
+                dest = FilePath(trash_path / relative)
+            else:
+                # Fallback: use filename only
+                dest = FilePath(trash_path / file_path.name)
+
+            operations.append(MoveOperation(source=file_path, destination=dest))
+
+        # Execute moves
+        result = self.file_system.move_files(operations)
+
+        if result.success:
+            removed_file_paths = [str(op.source.path) for op in operations]
+            removed_dirs = []
+
+            # Remove empty folders if requested
+            if remove_empty_folders:
+                self.log("Scanning for empty folders...")
+                removed_dirs = self._remove_empty_folders(target_paths)
+                if removed_dirs:
+                    self.log(f"Removed {len(removed_dirs)} empty folders")
+
+            # Create cleanup command for undo/redo
+            cleanup_cmd = CleanupCommand(removed_file_paths, trash_path, removed_dirs)
+
+            # Register with UndoRedoManager
+            self.undo_redo_manager.execute_command(cleanup_cmd)
+
+            files_msg = f"{len(operations)} files"
+            folders_msg = f", {len(removed_dirs)} empty folders" if removed_dirs else ""
+            self.log(f"Cleanup complete: {files_msg}{folders_msg} moved to trash")
+
             QMessageBox.information(
                 self,
                 "Cleanup Complete",
-                f"Successfully cleaned {files_cleaned} files"
+                f"Successfully cleaned {files_msg}{folders_msg}"
             )
-
-            # Update undo/redo buttons
-            self._update_undo_redo_buttons()
 
             # Refresh tree
             self.scan_media()
         else:
-            error = result.get("error", "Unknown error")
-            self.log(f"Cleanup failed: {error}")
-            QMessageBox.warning(self, "Cleanup Failed", error)
+            error_msg = f"Failed to clean files: {len(result.errors)} errors"
+            for error in result.errors[:5]:  # Show first 5 errors
+                error_msg += f"\n  • {error}"
+            if len(result.errors) > 5:
+                error_msg += f"\n  ... and {len(result.errors) - 5} more"
+
+            self.log(f"Cleanup failed: {error_msg}")
+            QMessageBox.warning(self, "Cleanup Failed", error_msg)
 
     def _find_sample_files(self, target_paths: Optional[List] = None) -> List[Path]:
         """Find all sample files in target paths or staging directory
@@ -1257,6 +1354,46 @@ class MainWindow(QMainWindow):
         result = dialog.exec()
         return result == QDialog.Accepted
 
+    def _remove_empty_folders(self, target_paths: List[FilePath]) -> List[str]:
+        """Remove empty folders from target paths
+
+        Args:
+            target_paths: Paths to scan for empty folders
+
+        Returns:
+            List of removed folder paths (as strings)
+        """
+        removed_dirs = []
+
+        for target in target_paths:
+            if not target.exists() or not target.path.is_dir():
+                continue
+
+            # Walk bottom-up to remove nested empty folders first
+            for dirpath, dirnames, filenames in os.walk(str(target.path), topdown=False):
+                # Skip if directory has files
+                if filenames:
+                    continue
+
+                # Skip if directory has subdirectories (that weren't removed)
+                current_path = Path(dirpath)
+                if any(current_path.joinpath(d).exists() for d in dirnames):
+                    continue
+
+                # Skip the root target directory itself
+                if current_path == target.path:
+                    continue
+
+                # Remove empty directory
+                try:
+                    current_path.rmdir()
+                    removed_dirs.append(str(current_path))
+                    self.log(f"  Removed empty folder: {current_path.name}")
+                except OSError as e:
+                    self.log(f"  Failed to remove {current_path.name}: {e}")
+
+        return removed_dirs
+
     def log(self, message: str):
         """Log message to console"""
         self.console.append(message)
@@ -1270,6 +1407,36 @@ class MainWindow(QMainWindow):
         # Save settings before closing
         self.settings_repo.save(self.settings)
         event.accept()
+
+    def _connect_undo_redo_signals(self):
+        """Connect UndoRedoManager signals to UI updates"""
+        self.undo_redo_manager.undo_available.connect(self._on_undo_available_changed)
+        self.undo_redo_manager.redo_available.connect(self._on_redo_available_changed)
+        self.undo_redo_manager.history_changed.connect(self._on_history_changed)
+
+    def _on_undo_available_changed(self, available: bool):
+        """Handle undo availability change"""
+        self.undo_btn.setEnabled(available)
+        if available:
+            desc = self.undo_redo_manager.get_undo_description()
+            self.undo_btn.setToolTip(f"Undo: {desc}")
+        else:
+            self.undo_btn.setToolTip("Nothing to undo")
+
+    def _on_redo_available_changed(self, available: bool):
+        """Handle redo availability change"""
+        self.redo_btn.setEnabled(available)
+        if available:
+            desc = self.undo_redo_manager.get_redo_description()
+            self.redo_btn.setToolTip(f"Redo: {desc}")
+        else:
+            self.redo_btn.setToolTip("Nothing to redo")
+
+    def _on_history_changed(self):
+        """Handle history change event"""
+        # Update button states based on current history
+        self.undo_btn.setEnabled(self.undo_redo_manager.can_undo())
+        self.redo_btn.setEnabled(self.undo_redo_manager.can_redo())
 
     def _setup_file_watcher(self):
         """Setup file system watcher for staging directory"""
