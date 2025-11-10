@@ -2,9 +2,9 @@
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTreeWidget, QTreeWidgetItem, QMessageBox,
-    QSplitter, QTextEdit, QLabel, QTabWidget, QMenu
+    QSplitter, QTextEdit, QLabel, QTabWidget, QMenu, QProgressBar
 )
-from PySide6.QtCore import Qt, QFileSystemWatcher, QTimer
+from PySide6.QtCore import Qt, QFileSystemWatcher, QTimer, QThread, Signal
 from PySide6.QtGui import QColor, QShortcut, QKeySequence
 from typing import Optional, List, Dict
 from pathlib import Path
@@ -32,6 +32,44 @@ from presentation.dialogs.movies_organize_dialog import MoviesOrganizeDialog
 from domain.value_objects.file_path import FilePath
 
 
+class ScanWorker(QThread):
+    """Background worker thread for media scanning"""
+
+    # Signals
+    scan_started = Signal()
+    scan_progress = Signal(str)  # Progress message
+    scan_completed = Signal(object)  # ScanResult
+    scan_failed = Signal(str)  # Error message
+
+    def __init__(self, settings: Settings, logger):
+        super().__init__()
+        self.settings = settings
+        self.logger = logger
+
+    def run(self):
+        """Execute scan in background thread"""
+        try:
+            self.scan_started.emit()
+            self.scan_progress.emit("Initializing scan...")
+
+            # Create scan use case
+            scan_use_case = ScanMediaUseCase(self.settings, self._thread_logger)
+
+            # Execute scan
+            self.scan_progress.emit("Scanning directories...")
+            result = scan_use_case.execute()
+
+            # Emit completion
+            self.scan_completed.emit(result)
+
+        except Exception as e:
+            self.scan_failed.emit(str(e))
+
+    def _thread_logger(self, message: str):
+        """Logger that emits progress signal"""
+        self.scan_progress.emit(message)
+
+
 class MainWindow(QMainWindow):
     """Main application window"""
 
@@ -47,6 +85,10 @@ class MainWindow(QMainWindow):
 
         # Current scan result
         self.scan_result = None
+
+        # Scan worker thread
+        self.scan_worker = None
+        self.is_scanning = False
 
         # Setup UI
         self.setWindowTitle("JMAD Media Tool - Refactored V1")
@@ -199,6 +241,15 @@ class MainWindow(QMainWindow):
 
         console_container_layout.addWidget(self.console_tabs)
 
+        # Progress bar for scan operations
+        self.scan_progress_bar = QProgressBar()
+        self.scan_progress_bar.setTextVisible(True)
+        self.scan_progress_bar.setFormat("Ready")
+        self.scan_progress_bar.setRange(0, 0)  # Indeterminate mode
+        self.scan_progress_bar.setVisible(False)  # Hidden by default
+        self.scan_progress_bar.setMaximumHeight(20)
+        console_container_layout.addWidget(self.scan_progress_bar)
+
         right_splitter.addWidget(console_container)
 
         # Set 50/50 split for right pane
@@ -294,27 +345,69 @@ class MainWindow(QMainWindow):
         return toolbar
 
     def scan_media(self):
-        """Execute media scan"""
+        """Execute media scan in background thread"""
+        # Prevent multiple simultaneous scans
+        if self.is_scanning:
+            self.log("Scan already in progress...")
+            return
+
+        # Clean up previous worker if exists
+        if self.scan_worker is not None:
+            self.scan_worker.wait()
+            self.scan_worker.deleteLater()
+
+        # Create and configure worker
+        self.scan_worker = ScanWorker(self.settings, self.log)
+        self.scan_worker.scan_started.connect(self._on_scan_started)
+        self.scan_worker.scan_progress.connect(self._on_scan_progress)
+        self.scan_worker.scan_completed.connect(self._on_scan_completed)
+        self.scan_worker.scan_failed.connect(self._on_scan_failed)
+        self.scan_worker.finished.connect(self._on_scan_finished)
+
+        # Start scan
+        self.is_scanning = True
+        self.scan_worker.start()
+
+    def _on_scan_started(self):
+        """Handle scan started"""
+        # Show progress bar
+        self.scan_progress_bar.setVisible(True)
+        self.scan_progress_bar.setFormat("Scanning...")
         self.log("Starting media scan...")
 
-        # Execute scan use case
-        scan_use_case = ScanMediaUseCase(self.settings, self.log)
-        self.scan_result = scan_use_case.execute()
+    def _on_scan_progress(self, message: str):
+        """Handle scan progress update"""
+        # Update progress bar text
+        self.scan_progress_bar.setFormat(message)
+
+    def _on_scan_completed(self, result):
+        """Handle scan completion"""
+        self.scan_result = result
 
         if self.scan_result.errors:
             for error in self.scan_result.errors:
                 self.log(f"Error: {error}")
             QMessageBox.warning(self, "Scan Errors", "\n".join(self.scan_result.errors))
-            return
+        else:
+            # Populate tree
+            self._populate_tree()
 
-        # Populate tree
-        self._populate_tree()
+            # V1: Count total files instead of episodes
+            total_files = sum(getattr(s, '_v1_file_count', 0) for s in self.scan_result.series_map.values())
+            self.statusBar().showMessage(
+                f"Scan complete: {self.scan_result.total_series} folders, {total_files} files"
+            )
 
-        # V1: Count total files instead of episodes
-        total_files = sum(getattr(s, '_v1_file_count', 0) for s in self.scan_result.series_map.values())
-        self.statusBar().showMessage(
-            f"Scan complete: {self.scan_result.total_series} folders, {total_files} files"
-        )
+    def _on_scan_failed(self, error_message: str):
+        """Handle scan failure"""
+        self.log(f"Scan failed: {error_message}")
+        QMessageBox.critical(self, "Scan Failed", f"An error occurred during scanning:\n{error_message}")
+
+    def _on_scan_finished(self):
+        """Handle scan thread finished (cleanup)"""
+        self.is_scanning = False
+        self.scan_progress_bar.setVisible(False)
+        self.scan_progress_bar.setFormat("Ready")
 
     def _populate_tree(self):
         """Populate media tree with scan results (V1: simple folder list)"""
