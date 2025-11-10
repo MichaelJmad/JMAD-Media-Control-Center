@@ -4,23 +4,30 @@ PyInstaller spec file for JMAD Media Tool
 """
 import os
 import sys
+from PyInstaller.utils.hooks import collect_submodules, collect_all
 
 # Get the absolute path to the project directory
 project_dir = os.path.abspath(SPECPATH)
 
 block_cipher = None
 
+# Collect all submodules from our application packages
+hidden = []
+hidden += collect_submodules('config')
+hidden += collect_submodules('domain')
+hidden += collect_submodules('application')
+hidden += collect_submodules('infrastructure')
+hidden += collect_submodules('presentation')
+
+# Collect all from PySide6
+pyside_datas, pyside_binaries, pyside_hiddenimports = collect_all('PySide6')
+
 a = Analysis(
     ['main.py'],
     pathex=[project_dir],  # Add project directory to Python path
-    binaries=[],
-    datas=[],
-    hiddenimports=[
-        # PySide6 modules that may not be auto-detected
-        'PySide6.QtCore',
-        'PySide6.QtGui',
-        'PySide6.QtWidgets',
-    ],
+    binaries=pyside_binaries,
+    datas=pyside_datas,
+    hiddenimports=hidden + pyside_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
