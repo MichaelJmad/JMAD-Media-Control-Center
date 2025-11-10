@@ -45,7 +45,8 @@
       ".yaml",
       ".torrent"
     ],
-    "custom_exts_str": ""
+    "custom_exts_str": "",
+    "remove_empty_folders": true
   },
   "fluff_patterns": [
     "\\[.*?\\]",
