@@ -2,7 +2,8 @@
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTreeWidget, QTreeWidgetItem, QMessageBox,
-    QSplitter, QTextEdit, QLabel, QTabWidget, QMenu, QProgressBar
+    QSplitter, QTextEdit, QLabel, QTabWidget, QMenu, QProgressBar,
+    QLineEdit, QComboBox, QCheckBox
 )
 from PySide6.QtCore import Qt, QFileSystemWatcher, QTimer, QThread, Signal
 from PySide6.QtGui import QColor, QShortcut, QKeySequence
@@ -170,6 +171,43 @@ class MainWindow(QMainWindow):
         tree_header = QLabel("Media Tree")
         tree_header.setStyleSheet("font-weight: bold; padding: 5px;")
         tree_layout.addWidget(tree_header)
+
+        # Search and filter controls
+        search_filter_layout = QVBoxLayout()
+        search_filter_layout.setSpacing(5)
+
+        # Search bar
+        search_layout = QHBoxLayout()
+        search_label = QLabel("Search:")
+        search_layout.addWidget(search_label)
+
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Type to search folders...")
+        self.search_input.textChanged.connect(self._on_search_changed)
+        search_layout.addWidget(self.search_input)
+        search_filter_layout.addLayout(search_layout)
+
+        # Filter controls
+        filter_layout = QHBoxLayout()
+        filter_label = QLabel("Filter:")
+        filter_layout.addWidget(filter_label)
+
+        # Show all / only unprocessed toggle
+        self.show_processed_cb = QCheckBox("Show Processed")
+        self.show_processed_cb.setChecked(True)  # Show all by default
+        self.show_processed_cb.stateChanged.connect(self._on_filter_changed)
+        filter_layout.addWidget(self.show_processed_cb)
+
+        # Media type filter
+        self.media_type_filter = QComboBox()
+        self.media_type_filter.addItems(["All Types", "TV Shows", "Anime", "Movies", "Unknown"])
+        self.media_type_filter.currentTextChanged.connect(self._on_filter_changed)
+        filter_layout.addWidget(self.media_type_filter)
+
+        filter_layout.addStretch()
+        search_filter_layout.addLayout(filter_layout)
+
+        tree_layout.addLayout(search_filter_layout)
 
         self.media_tree = QTreeWidget()
         self.media_tree.setHeaderLabels(["Folder Name", "File Count", "Media Type"])
@@ -561,9 +599,38 @@ class MainWindow(QMainWindow):
         # Create context menu
         menu = QMenu(self)
 
-        # Add "Organize" action
-        organize_action = menu.addAction("Organize...")
+        # Add "Organize As" submenu for direct media type selection
+        organize_menu = menu.addMenu("Organize As...")
+
+        tv_action = organize_menu.addAction("TV Show")
+        tv_action.triggered.connect(lambda: self._on_organize_with_type(MediaTypeDialog.TV_SERIES))
+
+        anime_action = organize_menu.addAction("Anime")
+        anime_action.triggered.connect(lambda: self._on_organize_with_type(MediaTypeDialog.ANIME))
+
+        movie_action = organize_menu.addAction("Movie")
+        movie_action.triggered.connect(lambda: self._on_organize_with_type(MediaTypeDialog.MOVIES))
+
+        menu.addSeparator()
+
+        # Add original "Organize..." (with dialog selection)
+        organize_action = menu.addAction("Organize... (Choose Type)")
         organize_action.triggered.connect(self._on_organize_requested)
+
+        menu.addSeparator()
+
+        # Add "Open in Explorer" action
+        import platform
+        system = platform.system()
+        if system == "Windows":
+            explorer_text = "Open in Explorer"
+        elif system == "Darwin":  # macOS
+            explorer_text = "Open in Finder"
+        else:  # Linux and others
+            explorer_text = "Open in File Manager"
+
+        open_explorer_action = menu.addAction(explorer_text)
+        open_explorer_action.triggered.connect(self._on_open_in_explorer)
 
         # Show menu at cursor position
         menu.exec_(self.media_tree.viewport().mapToGlobal(position))
@@ -591,6 +658,59 @@ class MainWindow(QMainWindow):
 
         # Update preview tree
         self._update_preview_tree(selected_items)
+
+    def _on_search_changed(self, text: str):
+        """Handle search text change - filter tree items
+
+        Args:
+            text: Search text entered by user
+        """
+        self._apply_filters()
+
+    def _on_filter_changed(self):
+        """Handle filter change - apply filters to tree"""
+        self._apply_filters()
+
+    def _apply_filters(self):
+        """Apply search and filter criteria to media tree"""
+        search_text = self.search_input.text().lower()
+        show_processed = self.show_processed_cb.isChecked()
+        media_type_filter = self.media_type_filter.currentText()
+
+        # Iterate through all top-level items
+        for i in range(self.media_tree.topLevelItemCount()):
+            item = self.media_tree.topLevelItem(i)
+            folder_name = item.text(0)
+
+            # Remove checkmark prefix for search
+            display_name = folder_name
+            is_processed = folder_name.startswith("✓ ")
+            if is_processed:
+                display_name = folder_name[2:]  # Remove "✓ " prefix
+
+            # Check search filter
+            search_match = search_text == "" or search_text in display_name.lower()
+
+            # Check processed filter
+            processed_match = show_processed or not is_processed
+
+            # Check media type filter
+            media_type = item.text(2)  # Media type is in column 2
+            if media_type_filter == "All Types":
+                type_match = True
+            elif media_type_filter == "TV Shows":
+                type_match = "TV" in media_type or "Series" in media_type
+            elif media_type_filter == "Anime":
+                type_match = "Anime" in media_type
+            elif media_type_filter == "Movies":
+                type_match = "Movie" in media_type
+            elif media_type_filter == "Unknown":
+                type_match = media_type == "Unknown" or media_type == ""
+            else:
+                type_match = True
+
+            # Show/hide item based on all filters
+            item.setHidden(not (search_match and processed_match and type_match))
 
     def _update_preview_tree(self, selected_items: List[QTreeWidgetItem]):
         """Update preview tree with files and folder structure of selected items
@@ -750,6 +870,84 @@ class MainWindow(QMainWindow):
         elif media_type_dialog.should_use_movies_dialog():
             # Movies → Movies Organize Dialog
             self._show_movies_organize_dialog(folder_paths, media_type)
+
+    def _on_organize_with_type(self, media_type: str):
+        """Handle organize action with predefined media type (no dialog)
+
+        Args:
+            media_type: Media type constant from MediaTypeDialog
+        """
+        selected_items = self.media_tree.selectedItems()
+
+        if not selected_items:
+            QMessageBox.information(self, "No Selection", "Please select folders to organize.")
+            return
+
+        # Get folder names and their actual paths from scan result
+        folder_paths = {}  # folder_name -> full_path
+        for item in selected_items:
+            folder_name = item.text(0)
+            # Strip the checkmark prefix if present (added to processed folders)
+            if folder_name.startswith("✓ "):
+                folder_name = folder_name[2:]  # Remove "✓ " prefix
+
+            if self.scan_result and folder_name in self.scan_result.series_map:
+                series = self.scan_result.series_map[folder_name]
+                folder_paths[folder_name] = str(series.root_path.path)
+
+        if not folder_paths:
+            QMessageBox.warning(self, "Error", "Could not find paths for selected folders.")
+            return
+
+        self.log(f"Organize as {media_type} requested for {len(folder_paths)} folder(s)")
+
+        # Route to appropriate organize dialog based on media type
+        if media_type in [MediaTypeDialog.TV_SERIES, MediaTypeDialog.ANIME]:
+            self._show_series_organize_dialog(folder_paths, media_type)
+        elif media_type == MediaTypeDialog.MOVIES:
+            self._show_movies_organize_dialog(folder_paths, media_type)
+
+    def _on_open_in_explorer(self):
+        """Open selected folder(s) in file explorer/finder"""
+        import subprocess
+        import platform
+
+        selected_items = self.media_tree.selectedItems()
+
+        if not selected_items:
+            return
+
+        system = platform.system()
+
+        for item in selected_items:
+            folder_name = item.text(0)
+            # Strip the checkmark prefix if present
+            if folder_name.startswith("✓ "):
+                folder_name = folder_name[2:]
+
+            if self.scan_result and folder_name in self.scan_result.series_map:
+                series = self.scan_result.series_map[folder_name]
+                folder_path = str(series.root_path.path)
+
+                try:
+                    if system == "Windows":
+                        # Open in Windows Explorer
+                        subprocess.Popen(['explorer', folder_path])
+                    elif system == "Darwin":  # macOS
+                        # Open in Finder
+                        subprocess.Popen(['open', folder_path])
+                    else:  # Linux and others
+                        # Try xdg-open (works on most Linux desktops)
+                        subprocess.Popen(['xdg-open', folder_path])
+
+                    self.log(f"Opened folder in file manager: {folder_name}")
+                except Exception as e:
+                    self.log(f"Error opening folder {folder_name}: {e}")
+                    QMessageBox.warning(
+                        self,
+                        "Error",
+                        f"Could not open folder in file manager:\n{e}"
+                    )
 
     def _show_series_organize_dialog(self, folder_paths: Dict[str, str], media_type: str):
         """Show series organize dialog (3-pane)

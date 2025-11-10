@@ -201,6 +201,10 @@ class SeriesOrganizeDialog(QDialog):
         self.source_tree.itemSelectionChanged.connect(self._on_source_selection_changed)
         self.source_tree.installEventFilter(self)  # Install event filter for hotkeys
 
+        # Enable mouse tracking for tooltips
+        self.source_tree.setMouseTracking(True)
+        self.source_tree.itemEntered.connect(self._on_source_item_hover)
+
         layout.addWidget(self.source_tree)
 
         return widget
@@ -341,6 +345,22 @@ class SeriesOrganizeDialog(QDialog):
         self.move_to_specials_btn.setEnabled(has_selection)
         self.move_to_movies_btn.setEnabled(has_selection)
         self.move_to_custom_btn.setEnabled(has_selection)
+
+    def _on_source_item_hover(self, item, column):
+        """Show tooltip with full name when hovering over items with long names
+
+        Args:
+            item: QTreeWidgetItem being hovered over
+            column: Column index
+        """
+        if item is None:
+            return
+
+        # Get the text from the item
+        text = item.text(column)
+
+        # Set tooltip to show full text (helpful for long filenames)
+        item.setToolTip(column, text)
 
     def _on_target_selection_changed(self):
         """Handle selection change in target tree - updates preview table"""
