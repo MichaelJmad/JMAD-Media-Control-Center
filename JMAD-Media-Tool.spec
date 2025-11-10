@@ -2,76 +2,24 @@
 """
 PyInstaller spec file for JMAD Media Tool
 """
+import os
+import sys
+
+# Get the absolute path to the project directory
+project_dir = os.path.abspath(SPECPATH)
 
 block_cipher = None
 
 a = Analysis(
     ['main.py'],
-    pathex=[],
+    pathex=[project_dir],  # Add project directory to Python path
     binaries=[],
     datas=[],
     hiddenimports=[
-        # PySide6 modules
+        # PySide6 modules that may not be auto-detected
         'PySide6.QtCore',
         'PySide6.QtGui',
         'PySide6.QtWidgets',
-
-        # Application modules (explicit imports for PyInstaller)
-        'config',
-        'config.settings',
-        'config.constants',
-
-        'domain',
-        'domain.models',
-        'domain.models.series',
-        'domain.models.season',
-        'domain.models.episode',
-        'domain.models.movie',
-        'domain.value_objects',
-        'domain.value_objects.file_path',
-        'domain.value_objects.episode_number',
-        'domain.value_objects.media_type',
-
-        'application',
-        'application.commands',
-        'application.commands.base_command',
-        'application.commands.cleanup_command',
-        'application.commands.organize_command',
-        'application.use_cases',
-        'application.use_cases.scan_media',
-        'application.use_cases.cleanup_files',
-        'application.use_cases.move_series',
-        'application.use_cases.organize_folders',
-        'application.dto',
-        'application.dto.scan_result',
-        'application.dto.organize_result',
-
-        'infrastructure',
-        'infrastructure.services',
-        'infrastructure.services.file_system_service',
-        'infrastructure.services.history_service',
-        'infrastructure.services.undo_redo_manager',
-        'infrastructure.services.media_scanner',
-        'infrastructure.parsers',
-        'infrastructure.parsers.episode_parser',
-        'infrastructure.parsers.fluff_parser',
-        'infrastructure.parsers.movie_parser',
-        'infrastructure.repositories',
-        'infrastructure.repositories.settings_repository',
-
-        'presentation',
-        'presentation.main_window',
-        'presentation.widgets',
-        'presentation.widgets.cleanup_panel',
-        'presentation.widgets.settings_panel',
-        'presentation.widgets.hotkeys_panel',
-        'presentation.widgets.toast',
-        'presentation.dialogs',
-        'presentation.dialogs.organize_dialog',
-        'presentation.dialogs.media_type_dialog',
-        'presentation.dialogs.series_organize_dialog',
-        'presentation.dialogs.movies_organize_dialog',
-        'presentation.view_models',
     ],
     hookspath=[],
     hooksconfig={},
@@ -80,6 +28,7 @@ a = Analysis(
         'pytest',
         'unittest',
         'tests',
+        'tkinter',  # Exclude if not needed
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
