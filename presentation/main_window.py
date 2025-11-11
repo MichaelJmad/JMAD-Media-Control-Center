@@ -454,12 +454,28 @@ class MainWindow(QMainWindow):
         """Populate media tree with scan results (V1: simple folder list)"""
         from domain.value_objects.media_type import MediaType
 
+        # Save scroll position before clearing
+        scrollbar = self.media_tree.verticalScrollBar()
+        saved_scroll_position = scrollbar.value() if scrollbar else 0
+
+        # Save selected item names (strip checkmark prefix if present)
+        selected_items = self.media_tree.selectedItems()
+        selected_names = []
+        for item in selected_items:
+            name = item.text(0)
+            # Remove checkmark prefix if present
+            if name.startswith("✓ "):
+                name = name[2:]
+            selected_names.append(name)
+
         self.media_tree.clear()
 
         if not self.scan_result:
             return
 
         # V1: Simple folder listing (no seasons/episodes tree)
+        items_to_select = []  # Track items to reselect after populating
+
         for folder_name, series in self.scan_result.series_map.items():
             # Get file count if available
             file_count = getattr(series, '_v1_file_count', 0)
@@ -485,6 +501,21 @@ class MainWindow(QMainWindow):
                 folder_item.setText(0, f"✓ {series.name}")
 
             self.media_tree.addTopLevelItem(folder_item)
+
+            # Check if this item should be reselected
+            if series.name in selected_names:
+                items_to_select.append(folder_item)
+
+        # Restore scroll position
+        if scrollbar and saved_scroll_position > 0:
+            # Use QTimer to ensure scroll happens after tree is fully rendered
+            QTimer.singleShot(0, lambda: scrollbar.setValue(saved_scroll_position))
+
+        # Restore selection
+        if items_to_select:
+            self.media_tree.clearSelection()
+            for item in items_to_select:
+                item.setSelected(True)
 
     def _is_folder_processed(self, series: 'Series') -> bool:
         """Check if a folder is in an organizational folder (processed)
