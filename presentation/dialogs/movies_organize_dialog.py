@@ -61,20 +61,52 @@ class MoviesOrganizeDialog(QDialog):
         if year_in_brackets:
             year = year_in_brackets.group(1)
 
-        # Remove all content in square brackets: [1080p], [BluRay], [2018], etc.
-        title_cleaned = re.sub(r'\[.*?\]', '', folder_name)
-
-        # If we didn't find a year in brackets, look for it in the cleaned title
+        # If we didn't find a year in brackets, look for it in the original title
         # Common formats: "Movie 2008", "Movie.2008", "Movie - 2008"
         if not year:
-            year_match = re.search(r'[\(\s\.\-_](\d{4})[\)\s\.\-_]*$', title_cleaned)
+            year_match = re.search(r'[\(\s\.\-_](\d{4})[\)\s\.\-_]*$', folder_name)
             if year_match:
                 year = year_match.group(1)
-                # Remove the year from title
-                title_cleaned = title_cleaned[:year_match.start()] + title_cleaned[year_match.end():]
 
-        # If year was in brackets/parens, also remove those from cleaned title
-        if year and year_in_brackets:
+        # Start cleaning process - replace dots and underscores with spaces
+        title_cleaned = re.sub(r'[._]', ' ', folder_name)
+
+        # Remove release group tags (typically -GROUPNAME at the end)
+        title_cleaned = re.sub(r'-[A-Z0-9]+$', '', title_cleaned, flags=re.I)
+
+        # Remove quality/resolution tags
+        title_cleaned = re.sub(r'\b\d{3,4}p\b', '', title_cleaned, flags=re.I)  # 720p, 1080p, 2160p
+        title_cleaned = re.sub(r'\b4K\b', '', title_cleaned, flags=re.I)
+        title_cleaned = re.sub(r'\bp\b', '', title_cleaned, flags=re.I)  # Standalone 'p'
+
+        # Remove source tags
+        title_cleaned = re.sub(r'\b(BluRay|BDRip|BD|WEB-DL|WEBRip|HDTV|DVDRip|BRRip)\b', '', title_cleaned, flags=re.I)
+
+        # Remove codec/encoding tags
+        title_cleaned = re.sub(r'\b(x264|x265|H\.?264|H\.?265|HEVC|AVC|10-?Bit|8-?Bit)\b', '', title_cleaned, flags=re.I)
+        title_cleaned = re.sub(r'\b\d+\s*bits?\b', '', title_cleaned, flags=re.I)  # "10 bits", "8 bit"
+
+        # Remove audio tags
+        title_cleaned = re.sub(r'\b(Dual[\s-]?Audio|Multi[\s-]?Audio|AAC|FLAC|DTS|DD|AC3|TrueHD|Atmos)\b', '', title_cleaned, flags=re.I)
+        title_cleaned = re.sub(r'\bFLAC\d+\.\d+\b', '', title_cleaned, flags=re.I)  # FLAC5.1, FLAC2.0
+
+        # Remove subtitle tags
+        title_cleaned = re.sub(r'\b(Subbed|Dubbed|Multi[\s-]?Sub)\b', '', title_cleaned, flags=re.I)
+
+        # Remove release info
+        title_cleaned = re.sub(r'\b(REPACK|PROPER|REAL|RETAIL|EXTENDED|UNRATED|DIRECTORS CUT)\b', '', title_cleaned, flags=re.I)
+
+        # Remove content in brackets and parentheses (except year)
+        title_cleaned = re.sub(r'\[.*?\]', '', title_cleaned)
+        if year:
+            # Remove parentheses content except the year
+            title_cleaned = re.sub(r'\([^)]*?\)', lambda m: '' if year not in m.group(0) else m.group(0), title_cleaned)
+        else:
+            title_cleaned = re.sub(r'\(.*?\)', '', title_cleaned)
+
+        # Remove the year from title if found (we'll add it back formatted later)
+        if year:
+            title_cleaned = re.sub(r'\b' + re.escape(year) + r'\b', '', title_cleaned)
             title_cleaned = re.sub(r'[\(\[]' + re.escape(year) + r'[\)\]]', '', title_cleaned)
 
         # Clean up extra spaces
