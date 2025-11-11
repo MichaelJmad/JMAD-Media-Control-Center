@@ -147,26 +147,30 @@ class MediaScanner:
         series_map[folder_name] = series
 
     def _add_loose_files_entry(self, directory: FilePath, loose_files: list, series_map: Dict[str, Series]):
-        """Add a special entry for loose media files in staging root
+        """Add entries for each loose media file in staging root
+
+        Each loose file is treated as its own entry with the filename as the folder name.
 
         Args:
             directory: Root staging directory
             loose_files: List of loose media filenames
             series_map: Dictionary to add series to
         """
-        folder_name = "[Loose Files]"
-        file_count = len(loose_files)
+        # Create a separate entry for each loose file
+        for filename in loose_files:
+            # Use the filename (without extension) as the folder name
+            file_stem = Path(filename).stem
 
-        # Create a simple Series object for loose files
-        series = Series(
-            name=folder_name,
-            clean_name=folder_name,
-            media_type=MediaType.UNKNOWN,
-            root_path=directory
-        )
+            # Create a simple Series object for this loose file
+            series = Series(
+                name=filename,  # Use full filename as name
+                clean_name=file_stem,
+                media_type=MediaType.UNKNOWN,
+                root_path=directory
+            )
 
-        series._v1_file_count = file_count
-        series_map[folder_name] = series
+            series._v1_file_count = 1  # Each loose file entry has 1 file
+            series_map[filename] = series
 
     def _count_video_files(self, directory: FilePath) -> int:
         """Count video files in a directory recursively (optimized)
