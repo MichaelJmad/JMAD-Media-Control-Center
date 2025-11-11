@@ -2,7 +2,7 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTreeWidget, QTreeWidgetItem, QSplitter, QWidget, QGroupBox,
-    QLineEdit, QInputDialog, QMessageBox, QTableWidget, QTableWidgetItem, QHeaderView
+    QLineEdit, QInputDialog, QMessageBox, QTableWidget, QTableWidgetItem, QHeaderView, QMenu
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
@@ -13,6 +13,7 @@ from copy import deepcopy
 from config.settings import Settings
 from domain.value_objects.file_path import FilePath
 from infrastructure.parsers.episode_parser import EpisodeParser
+from presentation.dialogs.episode_renumber_dialog import EpisodeRenumberDialog
 
 
 class SeriesOrganizeDialog(QDialog):
@@ -230,6 +231,10 @@ class SeriesOrganizeDialog(QDialog):
         self.source_tree.setMouseTracking(True)
         self.source_tree.itemEntered.connect(self._on_source_item_hover)
 
+        # Enable context menu
+        self.source_tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.source_tree.customContextMenuRequested.connect(self._show_source_context_menu)
+
         layout.addWidget(self.source_tree)
 
         return widget
@@ -268,6 +273,16 @@ class SeriesOrganizeDialog(QDialog):
         self.move_to_custom_btn.clicked.connect(self._on_move_to_custom)
         self.move_to_custom_btn.setEnabled(False)
         layout.addWidget(self.move_to_custom_btn)
+
+        # Separator
+        layout.addSpacing(20)
+
+        # Renumber Episodes button
+        self.renumber_episodes_btn = QPushButton("Renumber Episodes...")
+        self.renumber_episodes_btn.clicked.connect(self._on_renumber_episodes)
+        self.renumber_episodes_btn.setEnabled(False)
+        self.renumber_episodes_btn.setToolTip("Renumber episodes for split seasons (Part 1, Part 2)")
+        layout.addWidget(self.renumber_episodes_btn)
 
         layout.addStretch()
 
@@ -370,6 +385,7 @@ class SeriesOrganizeDialog(QDialog):
         self.move_to_specials_btn.setEnabled(has_selection)
         self.move_to_movies_btn.setEnabled(has_selection)
         self.move_to_custom_btn.setEnabled(has_selection)
+        self.renumber_episodes_btn.setEnabled(has_selection)
 
     def _on_source_item_hover(self, item, column):
         """Show tooltip with full name when hovering over items with long names
@@ -386,6 +402,27 @@ class SeriesOrganizeDialog(QDialog):
 
         # Set tooltip to show full text (helpful for long filenames)
         item.setToolTip(column, text)
+
+    def _show_source_context_menu(self, position):
+        """Show context menu for source tree
+
+        Args:
+            position: Position where context menu was requested
+        """
+        # Check if there's a selection
+        selected = self.source_tree.selectedItems()
+        if not selected:
+            return
+
+        # Create context menu
+        menu = QMenu(self)
+
+        # Add "Renumber Episodes..." action
+        renumber_action = menu.addAction("Renumber Episodes...")
+        renumber_action.triggered.connect(self._on_renumber_episodes)
+
+        # Show menu at cursor position
+        menu.exec_(self.source_tree.viewport().mapToGlobal(position))
 
     def _on_target_selection_changed(self):
         """Handle selection change in target tree - updates preview table"""
@@ -557,6 +594,159 @@ class SeriesOrganizeDialog(QDialog):
             return
 
         self._move_selected_to_target(dest_name, -2)  # -2 indicates custom
+
+    def _on_renumber_episodes(self):
+        """Handle Renumber Episodes button click"""
+        selected = self.source_tree.selectedItems()
+
+        if not selected:
+            return
+
+        # Collect all files from selected items
+        files_to_renumber = []  # List of (original_path, filename) tuples
+
+        for item in selected:
+            item_type = item.data(0, Qt.UserRole + 1)
+
+            if item_type == "folder":
+                # Add all files in folder
+                for i in range(item.childCount()):
+                    child = item.child(i)
+                    original_path = child.data(0, Qt.UserRole)
+                    filename = child.text(0)
+                    files_to_renumber.append((original_path, filename))
+            elif item_type == "file":
+                original_path = item.data(0, Qt.UserRole)
+                filename = item.text(0)
+                files_to_renumber.append((original_path, filename))
+
+        if not files_to_renumber:
+            QMessageBox.warning(
+                self,
+                "No Files Selected",
+                "Please select files or folders containing files to renumber."
+            )
+            return
+
+        # Open renumber dialog
+        renumber_dialog = EpisodeRenumberDialog(
+            self,
+            files_to_renumber,
+            self.episode_parser,
+            self.media_title
+        )
+
+        if renumber_dialog.exec() != QDialog.Accepted:
+            return
+
+        # Get renumber information
+        season_num, file_renumber_map = renumber_dialog.get_renumber_info()
+
+        # Apply renumbering and move to target
+        self._apply_renumbering_and_move(season_num, file_renumber_map, selected)
+
+    def _apply_renumbering_and_move(self, season_num: int, file_renumber_map: Dict[str, int], selected_items: List):
+        """Apply episode renumbering and move files to target pane
+
+        Args:
+            season_num: Target season number
+            file_renumber_map: Dict of original_path -> new_episode_number
+            selected_items: List of selected QTreeWidgetItems to move
+        """
+        # Determine target folder name
+        if season_num == 0:
+            if self.settings.use_season_00_for_specials:
+                target_name = "Season 00"
+            else:
+                target_name = "Specials"
+        else:
+            target_name = f"Season {season_num}"
+
+        # Find or create target folder
+        target_folder = self._find_or_create_target_folder(target_name, season_num)
+
+        # Collect files to move
+        files_to_move = []
+
+        for item in selected_items:
+            item_type = item.data(0, Qt.UserRole + 1)
+
+            if item_type == "folder":
+                # Move all files in folder
+                for i in range(item.childCount()):
+                    child = item.child(i)
+                    files_to_move.append(child)
+            elif item_type == "file":
+                files_to_move.append(item)
+
+        # Move files to target with renumbered episodes
+        for file_item in files_to_move:
+            original_path = file_item.data(0, Qt.UserRole)
+            original_name = file_item.text(0)
+
+            # Check if this file has a renumbered episode
+            if original_path in file_renumber_map:
+                new_episode = file_renumber_map[original_path]
+
+                # Generate filename with new episode number
+                ext = Path(original_name).suffix
+
+                if self.media_title:
+                    title_prefix = f"{self.media_title} "
+                else:
+                    title_prefix = ""
+
+                if season_num > 0:
+                    new_name = f"{title_prefix}S{season_num:02d}E{new_episode:02d}{ext}"
+                elif season_num == 0:
+                    # Specials - use original name
+                    new_name = original_name
+                else:
+                    new_name = original_name
+            else:
+                # No renumbering - use standard generation
+                new_name = self._generate_filename(original_path, original_name, season_num)
+
+            # Create item in target tree
+            target_file_item = QTreeWidgetItem([new_name])
+            target_file_item.setData(0, Qt.UserRole, original_path)
+            target_file_item.setData(0, Qt.UserRole + 1, "file")
+
+            target_folder.addChild(target_file_item)
+
+            # Store rename
+            self.file_renames[original_path] = new_name
+
+            # Remove from source tree
+            parent = file_item.parent()
+            if parent:
+                parent.removeChild(file_item)
+
+        # Clean up empty folders in source
+        self._remove_empty_folders()
+
+        # Expand target folder
+        target_folder.setExpanded(True)
+
+        # Save state AFTER move completes
+        self._save_history_state()
+
+        # Update preview table to show new files
+        self._update_preview_table()
+
+        # Update undo/redo buttons
+        self._update_undo_redo_buttons()
+
+        # Check for conflicts and update UI
+        self._check_conflicts()
+
+        # Auto-select next top-level item in source for keyboard workflow
+        if self.source_tree.topLevelItemCount() > 0:
+            # Try to select the first item (which will be the next unprocessed folder)
+            next_item = self.source_tree.topLevelItem(0)
+            self.source_tree.setCurrentItem(next_item)
+            next_item.setSelected(True)
+            self.source_tree.scrollToItem(next_item)
 
     def _move_selected_to_target(self, target_name: str, season_num: int):
         """Move selected items from source to target
