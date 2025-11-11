@@ -478,6 +478,10 @@ class SeriesOrganizeDialog(QDialog):
                 original_path = file_item.data(0, Qt.UserRole)
                 new_name = file_item.text(0)
 
+                # Skip if original_path is None or invalid
+                if not original_path:
+                    continue
+
                 # Add file row
                 self.preview_table.insertRow(row)
 
@@ -488,25 +492,24 @@ class SeriesOrganizeDialog(QDialog):
 
                 # Original path column (read-only) - show relative path
                 # Calculate relative path from staging directory
+                display_path = original_path  # Default fallback
                 if self.settings.directories.staging:
                     try:
                         staging_path = Path(self.settings.directories.staging)
                         full_path = Path(original_path)
                         relative_path = full_path.relative_to(staging_path)
                         display_path = str(relative_path)
-                    except (ValueError, AttributeError):
+                    except (ValueError, AttributeError, TypeError):
                         # Fallback to full path if relative calculation fails
-                        display_path = original_path
-                else:
-                    display_path = original_path
+                        display_path = str(original_path) if original_path else "Unknown"
 
-                original_item = QTableWidgetItem(display_path)
+                original_item = QTableWidgetItem(str(display_path))
                 original_item.setFlags(original_item.flags() & ~Qt.ItemIsEditable)
-                original_item.setToolTip(original_path)  # Full path on mouse-over
+                original_item.setToolTip(str(original_path))  # Full path on mouse-over
                 self.preview_table.setItem(row, 1, original_item)
 
                 # New name column (editable)
-                new_name_item = QTableWidgetItem(new_name)
+                new_name_item = QTableWidgetItem(str(new_name) if new_name else "")
                 new_name_item.setData(Qt.UserRole, original_path)  # Store original path for reference
                 self.preview_table.setItem(row, 2, new_name_item)
 
@@ -687,8 +690,15 @@ class SeriesOrganizeDialog(QDialog):
 
         # Move files to target with renumbered episodes
         for file_item in files_to_move:
+            if not file_item:
+                continue
+
             original_path = file_item.data(0, Qt.UserRole)
             original_name = file_item.text(0)
+
+            # Skip if original_path or original_name is invalid
+            if not original_path or not original_name:
+                continue
 
             # Check if this file has a renumbered episode
             if original_path in file_renumber_map:
@@ -848,8 +858,15 @@ class SeriesOrganizeDialog(QDialog):
 
         # Move files to target
         for file_item in files_to_move:
+            if not file_item:
+                continue
+
             original_path = file_item.data(0, Qt.UserRole)
             original_name = file_item.text(0)
+
+            # Skip if original_path or original_name is invalid
+            if not original_path or not original_name:
+                continue
 
             # Generate new filename based on season (pass full path for better detection)
             new_name = self._generate_filename(original_path, original_name, season_num)
@@ -1186,19 +1203,28 @@ class SeriesOrganizeDialog(QDialog):
         # Reset all colors in target tree first
         for i in range(self.target_tree.topLevelItemCount()):
             folder_item = self.target_tree.topLevelItem(i)
+            if not folder_item:
+                continue
             for j in range(folder_item.childCount()):
                 file_item = folder_item.child(j)
-                file_item.setForeground(0, QColor(255, 255, 255))  # White (default)
+                if file_item:
+                    file_item.setForeground(0, QColor(255, 255, 255))  # White (default)
 
         # Check each folder for conflicts in target tree
         for i in range(self.target_tree.topLevelItemCount()):
             folder_item = self.target_tree.topLevelItem(i)
+            if not folder_item:
+                continue
 
             # Build a dict of filename -> list of items with that name
             filename_map = {}
             for j in range(folder_item.childCount()):
                 file_item = folder_item.child(j)
+                if not file_item:
+                    continue
                 filename = file_item.text(0)
+                if not filename:
+                    continue
 
                 if filename not in filename_map:
                     filename_map[filename] = []
@@ -1210,16 +1236,19 @@ class SeriesOrganizeDialog(QDialog):
                     # Multiple files with same name - conflict!
                     has_conflicts = True
                     for item in items:
-                        item.setForeground(0, QColor(255, 100, 100))  # Red
+                        if item:
+                            item.setForeground(0, QColor(255, 100, 100))  # Red
 
         # Reset all colors in preview table (skip header rows)
         for row in range(self.preview_table.rowCount()):
             season_item = self.preview_table.item(row, 0)
-            if season_item and season_item.text().startswith("  "):  # File row (indented)
-                for col in range(3):
-                    item = self.preview_table.item(row, col)
-                    if item:
-                        item.setForeground(QColor(255, 255, 255))  # White (default)
+            if season_item:
+                season_text = season_item.text()
+                if season_text and season_text.startswith("  "):  # File row (indented)
+                    for col in range(3):
+                        item = self.preview_table.item(row, col)
+                        if item:
+                            item.setForeground(QColor(255, 255, 255))  # White (default)
 
         # Check preview table for conflicts (group by season/folder)
         # Build a map of season -> (filename -> list of rows)
@@ -1232,11 +1261,16 @@ class SeriesOrganizeDialog(QDialog):
                 continue
 
             # Skip header rows (not indented)
-            if not season_item.text().startswith("  "):
+            season_text = season_item.text()
+            if not season_text or not season_text.startswith("  "):
                 continue
 
-            season = season_item.text().strip()
+            season = season_text.strip()
             new_name = new_name_item.text()
+
+            # Skip if season or new_name is empty
+            if not season or not new_name:
+                continue
 
             if season not in season_conflicts:
                 season_conflicts[season] = {}
