@@ -496,6 +496,9 @@ class SeriesOrganizeDialog(QDialog):
         # Update the corresponding item in target tree
         self._update_target_tree_item_name(original_path, new_name)
 
+        # Recheck for conflicts after rename
+        self._check_conflicts()
+
     def _update_target_tree_item_name(self, original_path: str, new_name: str):
         """Update item name in target tree
 
@@ -914,21 +917,21 @@ class SeriesOrganizeDialog(QDialog):
         self.redo_btn.setEnabled(self.history_position < len(self.history_stack) - 1)
 
     def _check_conflicts(self):
-        """Check for filename conflicts in target tree and update UI
+        """Check for filename conflicts in target tree and preview table, update UI
 
-        Scans all folders in target tree for duplicate filenames.
+        Scans all folders in target tree and preview table for duplicate filenames.
         Highlights conflicting files in red and disables execute button.
         """
         has_conflicts = False
 
-        # Reset all colors first
+        # Reset all colors in target tree first
         for i in range(self.target_tree.topLevelItemCount()):
             folder_item = self.target_tree.topLevelItem(i)
             for j in range(folder_item.childCount()):
                 file_item = folder_item.child(j)
                 file_item.setForeground(0, QColor(255, 255, 255))  # White (default)
 
-        # Check each folder for conflicts
+        # Check each folder for conflicts in target tree
         for i in range(self.target_tree.topLevelItemCount()):
             folder_item = self.target_tree.topLevelItem(i)
 
@@ -949,6 +952,52 @@ class SeriesOrganizeDialog(QDialog):
                     has_conflicts = True
                     for item in items:
                         item.setForeground(0, QColor(255, 100, 100))  # Red
+
+        # Reset all colors in preview table (skip header rows)
+        for row in range(self.preview_table.rowCount()):
+            season_item = self.preview_table.item(row, 0)
+            if season_item and season_item.text().startswith("  "):  # File row (indented)
+                for col in range(3):
+                    item = self.preview_table.item(row, col)
+                    if item:
+                        item.setForeground(QColor(255, 255, 255))  # White (default)
+
+        # Check preview table for conflicts (group by season/folder)
+        # Build a map of season -> (filename -> list of rows)
+        season_conflicts = {}
+        for row in range(self.preview_table.rowCount()):
+            season_item = self.preview_table.item(row, 0)
+            new_name_item = self.preview_table.item(row, 2)
+
+            if not season_item or not new_name_item:
+                continue
+
+            # Skip header rows (not indented)
+            if not season_item.text().startswith("  "):
+                continue
+
+            season = season_item.text().strip()
+            new_name = new_name_item.text()
+
+            if season not in season_conflicts:
+                season_conflicts[season] = {}
+
+            if new_name not in season_conflicts[season]:
+                season_conflicts[season][new_name] = []
+
+            season_conflicts[season][new_name].append(row)
+
+        # Mark duplicate rows in preview table in red
+        for season, filename_map in season_conflicts.items():
+            for filename, rows in filename_map.items():
+                if len(rows) > 1:
+                    # Multiple files with same name in same season - conflict!
+                    has_conflicts = True
+                    for row in rows:
+                        for col in range(3):
+                            item = self.preview_table.item(row, col)
+                            if item:
+                                item.setForeground(QColor(255, 100, 100))  # Red
 
         # Enable/disable execute button based on conflicts
         self.execute_btn.setEnabled(not has_conflicts)
