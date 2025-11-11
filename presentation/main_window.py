@@ -30,6 +30,7 @@ from presentation.dialogs.organize_dialog import OrganizeDialog
 from presentation.dialogs.media_type_dialog import MediaTypeDialog
 from presentation.dialogs.series_organize_dialog import SeriesOrganizeDialog
 from presentation.dialogs.movies_organize_dialog import MoviesOrganizeDialog
+from presentation.dialogs.conflict_resolution_dialog import ConflictResolutionDialog
 from domain.value_objects.file_path import FilePath
 
 
@@ -1117,65 +1118,98 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to create series folder: {e}")
             return
 
+        # First pass: Detect conflicts
+        conflicts = []
+        file_mapping = {}  # Maps original_path -> (target_path, file_info, season_folder, folder_name)
+
+        for season_num, season_data in operations["seasons"].items():
+            folder_name = season_data["folder_name"]  # e.g., "Season 1", "Specials", "Movies"
+            files = season_data["files"]
+
+            # Create season folder
+            season_folder = series_folder / folder_name
+
+            for file_info in files:
+                original_path = Path(file_info["original_path"])
+                new_name = file_info["new_name"]
+
+                # For movies, create subfolder for each movie
+                if folder_name == "Movies":
+                    movie_title = Path(new_name).stem  # Get filename without extension
+                    movie_folder = season_folder / movie_title
+                    target_path = movie_folder / new_name
+                else:
+                    # For regular seasons, put files directly in season folder
+                    target_path = season_folder / new_name
+
+                # Store mapping for later use
+                file_mapping[str(original_path)] = (target_path, file_info, season_folder, folder_name)
+
+                # Check if target already exists
+                if target_path.exists():
+                    conflicts.append((str(original_path), str(target_path)))
+
+        # If conflicts detected, show resolution dialog
+        conflict_action = ConflictResolutionDialog.ACTION_RENAME  # Default
+        if conflicts:
+            dialog = ConflictResolutionDialog(self, conflicts)
+            conflict_action = dialog.exec_()
+
+            if conflict_action == ConflictResolutionDialog.ACTION_CANCEL:
+                self.log("Organize cancelled due to conflicts")
+                return
+
         # Track all source folders for cleanup
         source_folders_to_check = set()
 
         # Collect all move operations for history tracking
         move_operations = []
 
-        # Process each season
+        # Second pass: Execute moves with conflict resolution
         files_moved = 0
         errors = []
 
-        for season_num, season_data in operations["seasons"].items():
-            folder_name = season_data["folder_name"]  # e.g., "Season 1", "Specials"
-            files = season_data["files"]
+        for original_path_str, (target_path, file_info, season_folder, folder_name) in file_mapping.items():
+            original_path = Path(original_path_str)
 
-            # Create season folder
-            season_folder = series_folder / folder_name
+            # Create necessary folders
             try:
-                season_folder.mkdir(parents=True, exist_ok=True)
-                self.log(f"Created season folder: {season_folder}")
+                target_path.parent.mkdir(parents=True, exist_ok=True)
             except Exception as e:
-                errors.append(f"Failed to create {season_folder}: {e}")
+                errors.append(f"Failed to create folder {target_path.parent}: {e}")
                 continue
 
-            # Move each file
-            for file_info in files:
-                original_path = Path(file_info["original_path"])
-                new_name = file_info["new_name"]
+            # Track source folder for cleanup
+            source_folders_to_check.add(original_path.parent)
 
-                # For movies, create subfolder for each movie (folder = movie title without extension)
-                if folder_name == "Movies":
-                    movie_title = Path(new_name).stem  # Get filename without extension
-                    movie_folder = season_folder / movie_title
+            # Resolve conflict if needed
+            final_target = target_path
+            if target_path.exists():
+                if conflict_action == ConflictResolutionDialog.ACTION_OVERWRITE:
+                    # Remove existing file before moving
                     try:
-                        movie_folder.mkdir(parents=True, exist_ok=True)
+                        target_path.unlink()
                     except Exception as e:
-                        errors.append(f"Failed to create movie folder {movie_title}: {e}")
+                        errors.append(f"Failed to remove existing file {target_path.name}: {e}")
                         continue
-                    target_path = movie_folder / new_name
-                else:
-                    # For regular seasons, put files directly in season folder
-                    target_path = season_folder / new_name
+                elif conflict_action == ConflictResolutionDialog.ACTION_RENAME:
+                    # Find a unique name by adding (1), (2), etc.
+                    final_target = self._get_unique_filename(target_path)
 
-                # Track source folder for cleanup
-                source_folders_to_check.add(original_path.parent)
+            try:
+                # Move and rename file
+                shutil.move(str(original_path), str(final_target))
+                self.log(f"Moved: {original_path.name} → {final_target}")
+                files_moved += 1
 
-                try:
-                    # Move and rename file
-                    shutil.move(str(original_path), str(target_path))
-                    self.log(f"Moved: {original_path.name} → {target_path}")
-                    files_moved += 1
+                # Record move operation for undo
+                move_operations.append(MoveOperation(
+                    source=FilePath(str(original_path)),
+                    destination=FilePath(str(final_target))
+                ))
 
-                    # Record move operation for undo
-                    move_operations.append(MoveOperation(
-                        source=FilePath(str(original_path)),
-                        destination=FilePath(str(target_path))
-                    ))
-
-                except Exception as e:
-                    errors.append(f"Failed to move {original_path.name}: {e}")
+            except Exception as e:
+                errors.append(f"Failed to move {original_path.name}: {e}")
 
         # Remove non-media files from source folders
         non_media_removed = self._cleanup_non_media_files(source_folders_to_check)
@@ -1214,6 +1248,30 @@ class MainWindow(QMainWindow):
 
         # Refresh tree to show updated staging directory
         self.scan_media()
+
+    def _get_unique_filename(self, path: Path) -> Path:
+        """Get a unique filename by adding (1), (2), etc. if file exists
+
+        Args:
+            path: Original path
+
+        Returns:
+            Unique path that doesn't exist
+        """
+        if not path.exists():
+            return path
+
+        stem = path.stem
+        suffix = path.suffix
+        parent = path.parent
+        counter = 1
+
+        while True:
+            new_name = f"{stem} ({counter}){suffix}"
+            new_path = parent / new_name
+            if not new_path.exists():
+                return new_path
+            counter += 1
 
     def _show_movies_organize_dialog(self, folder_paths: Dict[str, str], media_type: str):
         """Show movies organize dialog
