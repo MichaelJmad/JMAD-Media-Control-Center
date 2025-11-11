@@ -622,6 +622,9 @@ class SeriesOrganizeDialog(QDialog):
         # Update undo/redo buttons
         self._update_undo_redo_buttons()
 
+        # Check for conflicts and update UI
+        self._check_conflicts()
+
         # Auto-select next top-level item in source for keyboard workflow
         if self.source_tree.topLevelItemCount() > 0:
             # Try to select the first item (which will be the next unprocessed folder)
@@ -866,6 +869,9 @@ class SeriesOrganizeDialog(QDialog):
         # Update preview table
         self._update_preview_table()
 
+        # Check for conflicts
+        self._check_conflicts()
+
     def _on_local_undo(self):
         """Handle local undo button click"""
         if self.history_position <= 0:
@@ -882,6 +888,7 @@ class SeriesOrganizeDialog(QDialog):
         # Update UI
         self._update_preview_table()
         self._update_undo_redo_buttons()
+        self._check_conflicts()
 
     def _on_local_redo(self):
         """Handle local redo button click"""
@@ -899,11 +906,58 @@ class SeriesOrganizeDialog(QDialog):
         # Update UI
         self._update_preview_table()
         self._update_undo_redo_buttons()
+        self._check_conflicts()
 
     def _update_undo_redo_buttons(self):
         """Update undo/redo button states"""
         self.undo_btn.setEnabled(self.history_position > 0)
         self.redo_btn.setEnabled(self.history_position < len(self.history_stack) - 1)
+
+    def _check_conflicts(self):
+        """Check for filename conflicts in target tree and update UI
+
+        Scans all folders in target tree for duplicate filenames.
+        Highlights conflicting files in red and disables execute button.
+        """
+        has_conflicts = False
+
+        # Reset all colors first
+        for i in range(self.target_tree.topLevelItemCount()):
+            folder_item = self.target_tree.topLevelItem(i)
+            for j in range(folder_item.childCount()):
+                file_item = folder_item.child(j)
+                file_item.setForeground(0, QColor(255, 255, 255))  # White (default)
+
+        # Check each folder for conflicts
+        for i in range(self.target_tree.topLevelItemCount()):
+            folder_item = self.target_tree.topLevelItem(i)
+
+            # Build a dict of filename -> list of items with that name
+            filename_map = {}
+            for j in range(folder_item.childCount()):
+                file_item = folder_item.child(j)
+                filename = file_item.text(0)
+
+                if filename not in filename_map:
+                    filename_map[filename] = []
+                filename_map[filename].append(file_item)
+
+            # Mark duplicates in red
+            for filename, items in filename_map.items():
+                if len(items) > 1:
+                    # Multiple files with same name - conflict!
+                    has_conflicts = True
+                    for item in items:
+                        item.setForeground(0, QColor(255, 100, 100))  # Red
+
+        # Enable/disable execute button based on conflicts
+        self.execute_btn.setEnabled(not has_conflicts)
+
+        # Update execute button tooltip
+        if has_conflicts:
+            self.execute_btn.setToolTip("Cannot execute: Duplicate filenames detected (shown in red)")
+        else:
+            self.execute_btn.setToolTip("Execute the organize operation")
 
     def _on_execute(self):
         """Handle Execute button click
