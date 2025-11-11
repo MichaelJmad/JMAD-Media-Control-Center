@@ -343,13 +343,31 @@ class SeriesOrganizeDialog(QDialog):
             if not folder_path.exists():
                 continue
 
+            # Check if this is a loose file (file path instead of folder path)
+            video_exts = ['.mkv', '.mp4', '.avi', '.m4v', '.mov']
+            if folder_path.is_file() and folder_path.suffix.lower() in video_exts:
+                # This is a loose file - create a folder item with just this one file
+                folder_item = QTreeWidgetItem([folder_name])
+                folder_item.setData(0, Qt.UserRole, str(folder_path.parent))  # Store parent directory
+                folder_item.setData(0, Qt.UserRole + 1, "folder")  # Mark as folder
+
+                # Add just this one file
+                file_item = QTreeWidgetItem([folder_path.name])
+                file_item.setData(0, Qt.UserRole, str(folder_path))  # Store full path
+                file_item.setData(0, Qt.UserRole + 1, "file")  # Mark as file
+                folder_item.addChild(file_item)
+
+                self.source_files[folder_name] = [folder_path]
+                self.source_tree.addTopLevelItem(folder_item)
+                continue
+
+            # This is a regular folder - search for all video files recursively
             # Create folder item in tree
             folder_item = QTreeWidgetItem([folder_name])
             folder_item.setData(0, Qt.UserRole, str(folder_path))  # Store full path
             folder_item.setData(0, Qt.UserRole + 1, "folder")  # Mark as folder
 
             # Find video files in folder
-            video_exts = ['.mkv', '.mp4', '.avi', '.m4v', '.mov']
             files = []
 
             for file_path in folder_path.rglob('*'):

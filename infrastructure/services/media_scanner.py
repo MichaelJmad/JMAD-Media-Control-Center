@@ -161,12 +161,15 @@ class MediaScanner:
             # Use the filename (without extension) as the folder name
             file_stem = Path(filename).stem
 
+            # Construct the full path to this loose file
+            file_path = FilePath(str(directory.path / filename))
+
             # Create a simple Series object for this loose file
             series = Series(
                 name=filename,  # Use full filename as name
                 clean_name=file_stem,
                 media_type=MediaType.UNKNOWN,
-                root_path=directory
+                root_path=file_path  # Use file path, not directory
             )
 
             series._v1_file_count = 1  # Each loose file entry has 1 file

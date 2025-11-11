@@ -1,7 +1,7 @@
 """Episode renumber dialog for handling split seasons"""
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTableWidget, QTableWidgetItem, QHeaderView, QSpinBox, QGroupBox, QCheckBox
+    QTableWidget, QTableWidgetItem, QHeaderView, QSpinBox, QGroupBox
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
@@ -17,7 +17,7 @@ class EpisodeRenumberDialog(QDialog):
 
     Workflow:
     1. Show all files from selected folders/files
-    2. User selects which files to renumber (Group B)
+    2. User selects which files to renumber (Group B) using shift-click, drag, etc.
     3. Unselected files (Group A) keep their episode numbers
     4. Selected files (Group B) get renumbered starting from max(Group A) + 1
     5. Files are returned with new episode numbers to be moved to target season
@@ -61,57 +61,53 @@ class EpisodeRenumberDialog(QDialog):
 
         # Instructions
         instructions = QLabel(
-            "Select files to renumber (Group B). Unselected files (Group A) keep their episode numbers.\n"
+            "Select files to renumber (Group B) using click, Shift+click, Ctrl+click, or drag.\n"
+            "Unselected files (Group A) keep their episode numbers.\n"
             "Group B will be renumbered starting from the last episode of Group A + 1."
         )
         instructions.setWordWrap(True)
         layout.addWidget(instructions)
 
         # File selection table
-        table_group = QGroupBox("Files")
+        table_group = QGroupBox("Files (Select rows for Group B)")
         table_layout = QVBoxLayout(table_group)
 
         self.file_table = QTableWidget()
-        self.file_table.setColumnCount(4)
-        self.file_table.setHorizontalHeaderLabels(["Select (Group B)", "Filename", "Current Ep", "New Ep"])
+        self.file_table.setColumnCount(3)
+        self.file_table.setHorizontalHeaderLabels(["Filename", "Current Ep", "New Ep"])
+
+        # Enable extended selection (shift-click, ctrl-click, drag)
+        self.file_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.file_table.setSelectionMode(QTableWidget.ExtendedSelection)
 
         # Set column widths
         header = self.file_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
 
         # Populate table
         self.file_table.setRowCount(len(self.files))
         for row, (original_path, filename) in enumerate(self.files):
-            # Checkbox for selection
-            checkbox = QCheckBox()
-            checkbox.stateChanged.connect(self._on_selection_changed)
-            checkbox_widget = QTableWidgetItem()
-            checkbox_widget.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
-            checkbox_widget.setCheckState(Qt.Unchecked)
-            checkbox_widget.setData(Qt.UserRole, original_path)  # Store original path
-            self.file_table.setItem(row, 0, checkbox_widget)
-
-            # Filename
+            # Store original path in first column item
             filename_item = QTableWidgetItem(filename)
             filename_item.setFlags(filename_item.flags() & ~Qt.ItemIsEditable)
-            self.file_table.setItem(row, 1, filename_item)
+            filename_item.setData(Qt.UserRole, original_path)  # Store original path
+            self.file_table.setItem(row, 0, filename_item)
 
             # Current episode
             current_ep = self.file_episodes.get(original_path, 0)
             current_ep_item = QTableWidgetItem(str(current_ep) if current_ep > 0 else "Unknown")
             current_ep_item.setFlags(current_ep_item.flags() & ~Qt.ItemIsEditable)
-            self.file_table.setItem(row, 2, current_ep_item)
+            self.file_table.setItem(row, 1, current_ep_item)
 
             # New episode (will be calculated)
             new_ep_item = QTableWidgetItem("")
             new_ep_item.setFlags(new_ep_item.flags() & ~Qt.ItemIsEditable)
-            self.file_table.setItem(row, 3, new_ep_item)
+            self.file_table.setItem(row, 2, new_ep_item)
 
-        # Connect item changed signal for checkbox toggling
-        self.file_table.itemChanged.connect(self._on_selection_changed)
+        # Connect selection changed signal
+        self.file_table.itemSelectionChanged.connect(self._on_selection_changed)
 
         table_layout.addWidget(self.file_table)
         layout.addWidget(table_group)
@@ -153,16 +149,19 @@ class EpisodeRenumberDialog(QDialog):
 
     def _update_preview(self):
         """Update the 'New Ep' column based on current selection"""
+        # Get selected rows
+        selected_rows = set(index.row() for index in self.file_table.selectedIndexes())
+
         # Collect Group A (unselected) and Group B (selected)
         group_a = []
         group_b = []
 
         for row in range(self.file_table.rowCount()):
-            checkbox_item = self.file_table.item(row, 0)
-            original_path = checkbox_item.data(Qt.UserRole)
+            filename_item = self.file_table.item(row, 0)
+            original_path = filename_item.data(Qt.UserRole)
             current_ep = self.file_episodes.get(original_path, 0)
 
-            is_selected = checkbox_item.checkState() == Qt.Checked
+            is_selected = row in selected_rows
 
             if is_selected:
                 group_b.append((row, original_path, current_ep))
@@ -179,14 +178,14 @@ class EpisodeRenumberDialog(QDialog):
         # Update 'New Ep' column
         for row, original_path, current_ep in group_a:
             # Group A keeps original episode numbers
-            new_ep_item = self.file_table.item(row, 3)
+            new_ep_item = self.file_table.item(row, 2)
             new_ep_item.setText(str(current_ep) if current_ep > 0 else "Unknown")
             new_ep_item.setForeground(QColor(255, 255, 255))  # White
 
         for idx, (row, original_path, current_ep) in enumerate(group_b):
             # Group B gets renumbered starting from group_b_start
             new_ep = group_b_start + idx
-            new_ep_item = self.file_table.item(row, 3)
+            new_ep_item = self.file_table.item(row, 2)
             new_ep_item.setText(str(new_ep))
             new_ep_item.setForeground(QColor(100, 255, 100))  # Green to indicate change
 
@@ -201,10 +200,10 @@ class EpisodeRenumberDialog(QDialog):
         file_renumber_map = {}
 
         for row in range(self.file_table.rowCount()):
-            checkbox_item = self.file_table.item(row, 0)
-            original_path = checkbox_item.data(Qt.UserRole)
+            filename_item = self.file_table.item(row, 0)
+            original_path = filename_item.data(Qt.UserRole)
 
-            new_ep_item = self.file_table.item(row, 3)
+            new_ep_item = self.file_table.item(row, 2)
             new_ep_text = new_ep_item.text()
 
             if new_ep_text and new_ep_text != "Unknown":
