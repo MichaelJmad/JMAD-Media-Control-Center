@@ -6,6 +6,7 @@ scanner that will be used in future versions.
 """
 from pathlib import Path
 from typing import Dict, Optional
+import os
 
 from domain.models.series import Series
 from domain.value_objects.file_path import FilePath
@@ -45,10 +46,11 @@ class MediaScanner:
             }
 
     def scan_directory(self, directory: FilePath) -> Dict[str, Series]:
-        """Scan a directory and list top-level folders
+        """Scan a directory and list top-level folders and loose media files
 
         Handles organizational folders (Anime, TV Shows, Movies) by scanning inside
-        them and setting media types accordingly.
+        them and setting media types accordingly. Also detects loose media files
+        in the staging root.
 
         Args:
             directory: Root directory to scan (staging)
@@ -60,25 +62,38 @@ class MediaScanner:
             return {}
 
         series_map: Dict[str, Series] = {}
+        loose_files = []
 
-        # List only top-level folders in staging
+        # List top-level folders and files in staging
         try:
-            for entry in directory.path.iterdir():
-                if entry.is_dir():
-                    folder_name = entry.name
-                    folder_path = FilePath(entry)
+            # Use os.scandir for better performance
+            with os.scandir(str(directory.path)) as entries:
+                for entry in entries:
+                    if entry.is_dir(follow_symlinks=False):
+                        folder_name = entry.name
+                        folder_path = FilePath(Path(entry.path))
 
-                    # Check if this is an organizational folder
-                    if folder_name.lower() in self.organizational_folders:
-                        # Scan inside the organizational folder
-                        media_type = self.organizational_folders[folder_name.lower()]
-                        self._scan_organizational_folder(folder_path, media_type, series_map)
-                    else:
-                        # Regular folder - treat as media title
-                        self._add_media_folder(folder_name, folder_path, series_map)
+                        # Check if this is an organizational folder
+                        if folder_name.lower() in self.organizational_folders:
+                            # Scan inside the organizational folder
+                            media_type = self.organizational_folders[folder_name.lower()]
+                            self._scan_organizational_folder(folder_path, media_type, series_map)
+                        else:
+                            # Regular folder - treat as media title
+                            self._add_media_folder(folder_name, folder_path, series_map)
+
+                    elif entry.is_file(follow_symlinks=False):
+                        # Check if this is a media file
+                        file_ext = Path(entry.name).suffix.lower()
+                        if file_ext in VIDEO_EXTENSIONS:
+                            loose_files.append(entry.name)
 
         except (OSError, PermissionError):
             pass
+
+        # If we found loose media files, create a special entry for them
+        if loose_files:
+            self._add_loose_files_entry(directory, loose_files, series_map)
 
         return series_map
 
@@ -91,11 +106,13 @@ class MediaScanner:
             series_map: Dictionary to add series to
         """
         try:
-            for entry in org_folder.path.iterdir():
-                if entry.is_dir():
-                    folder_name = entry.name
-                    folder_path = FilePath(entry)
-                    self._add_media_folder(folder_name, folder_path, series_map, media_type)
+            # Use os.scandir for better performance
+            with os.scandir(str(org_folder.path)) as entries:
+                for entry in entries:
+                    if entry.is_dir(follow_symlinks=False):
+                        folder_name = entry.name
+                        folder_path = FilePath(Path(entry.path))
+                        self._add_media_folder(folder_name, folder_path, series_map, media_type)
         except (OSError, PermissionError):
             pass
 
@@ -129,8 +146,30 @@ class MediaScanner:
 
         series_map[folder_name] = series
 
+    def _add_loose_files_entry(self, directory: FilePath, loose_files: list, series_map: Dict[str, Series]):
+        """Add a special entry for loose media files in staging root
+
+        Args:
+            directory: Root staging directory
+            loose_files: List of loose media filenames
+            series_map: Dictionary to add series to
+        """
+        folder_name = "[Loose Files]"
+        file_count = len(loose_files)
+
+        # Create a simple Series object for loose files
+        series = Series(
+            name=folder_name,
+            clean_name=folder_name,
+            media_type=MediaType.UNKNOWN,
+            root_path=directory
+        )
+
+        series._v1_file_count = file_count
+        series_map[folder_name] = series
+
     def _count_video_files(self, directory: FilePath) -> int:
-        """Count video files in a directory recursively
+        """Count video files in a directory recursively (optimized)
 
         Args:
             directory: Directory to count files in
@@ -141,9 +180,11 @@ class MediaScanner:
         count = 0
 
         try:
-            for entry in directory.path.rglob("*"):
-                if entry.is_file() and entry.suffix.lower() in VIDEO_EXTENSIONS:
-                    count += 1
+            # Use os.walk for much better performance than rglob
+            for root, dirs, files in os.walk(str(directory.path)):
+                for file in files:
+                    if Path(file).suffix.lower() in VIDEO_EXTENSIONS:
+                        count += 1
         except (OSError, PermissionError):
             pass
 
