@@ -1,10 +1,10 @@
 {
   "directories": {
-    "staging": "L:/Projects/JMAD-Media-Tool/staging",
+    "staging": "F:/Staging",
     "tv_shows": "",
     "movies": "",
     "anime": "",
-    "trash": "L:/Projects/JMAD-Media-Tool/Trash"
+    "trash": "F:/trash"
   },
   "series_pattern": "{clean}",
   "episode_pattern": "{series} - S{season:02d}E{episode:02d}{ext}",
@@ -15,7 +15,9 @@
   "org_folder_anime": "Anime",
   "org_folder_tv_shows": "TV Shows",
   "org_folder_movies": "Movies",
-  "hotkeys": {},
+  "hotkeys": {
+    "open_movie_dialog": "Alt+M"
+  },
   "move_presets": [],
   "cleanup_ext_states": {
     "selected": [
