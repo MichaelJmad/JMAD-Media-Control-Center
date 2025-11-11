@@ -21,6 +21,8 @@ class EpisodeParser:
         (re.compile(r"(\d{1,2})x(\d{1,3})", re.I), "alternative"),
         # Three digits: 105 (season 1, episode 5)
         (re.compile(r"[._\-\s](?<!\d)(\d)(\d{2})(?!\d)[._\-\s]?", re.I), "three_digit"),
+        # Common anime pattern: "Series Name - 04" or "Series Name - Episode 04"
+        (re.compile(r"\s+-\s+(?:episode\s+)?(\d{1,3})(?:[._\-\s]|$)", re.I), "dash_episode"),
         # Episode only: E01, episode 01, ep 01
         (re.compile(r"[._\-\s]e(\d{1,3})(?:[._\-\s]|$)", re.I), "episode_only"),
         (re.compile(r"episode[\s._-]*(\d+)", re.I), "episode_word"),
@@ -81,7 +83,7 @@ class EpisodeParser:
                     return int(groups[0]), int(groups[1])
 
                 # Episode only patterns - need to infer season
-                if pattern_type in ("episode_only", "episode_word", "ep_abbrev", "part",
+                if pattern_type in ("episode_only", "episode_word", "ep_abbrev", "part", "dash_episode",
                                     "three_digit_only", "two_digit_only", "single_digit_only"):
                     episode = int(groups[-1])
                     # Try to find season hint in filename
