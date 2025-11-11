@@ -421,6 +421,12 @@ class SeriesOrganizeDialog(QDialog):
         renumber_action = menu.addAction("Renumber Episodes...")
         renumber_action.triggered.connect(self._on_renumber_episodes)
 
+        menu.addSeparator()
+
+        # Add "Ignore" action
+        ignore_action = menu.addAction("Ignore (Skip These Files)")
+        ignore_action.triggered.connect(self._on_ignore_selected)
+
         # Show menu at cursor position
         menu.exec_(self.source_tree.viewport().mapToGlobal(position))
 
@@ -743,6 +749,69 @@ class SeriesOrganizeDialog(QDialog):
         # Auto-select next top-level item in source for keyboard workflow
         if self.source_tree.topLevelItemCount() > 0:
             # Try to select the first item (which will be the next unprocessed folder)
+            next_item = self.source_tree.topLevelItem(0)
+            self.source_tree.setCurrentItem(next_item)
+            next_item.setSelected(True)
+            self.source_tree.scrollToItem(next_item)
+
+    def _on_ignore_selected(self):
+        """Handle Ignore action - removes selected items from source tree
+
+        Allows users to skip files/folders without organizing them.
+        Items are removed from the source tree but not deleted from disk.
+        """
+        selected = self.source_tree.selectedItems()
+
+        if not selected:
+            return
+
+        # Confirm action
+        item_count = len(selected)
+        file_count = 0
+
+        # Count total files that will be ignored
+        for item in selected:
+            item_type = item.data(0, Qt.UserRole + 1)
+            if item_type == "folder":
+                file_count += item.childCount()
+            elif item_type == "file":
+                file_count += 1
+
+        response = QMessageBox.question(
+            self,
+            "Ignore Files",
+            f"Ignore {item_count} item(s) containing {file_count} file(s)?\n\n"
+            "These files will be skipped and not organized.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if response != QMessageBox.Yes:
+            return
+
+        # Remove selected items from source tree
+        for item in selected:
+            # Get parent and remove item
+            parent = item.parent()
+            if parent:
+                parent.removeChild(item)
+            else:
+                # Top-level item
+                index = self.source_tree.indexOfTopLevelItem(item)
+                if index >= 0:
+                    self.source_tree.takeTopLevelItem(index)
+
+        # Clean up empty folders
+        self._remove_empty_folders()
+
+        # Save state for undo/redo
+        self._save_history_state()
+
+        # Update undo/redo buttons
+        self._update_undo_redo_buttons()
+
+        # Auto-select next item if available
+        if self.source_tree.topLevelItemCount() > 0:
             next_item = self.source_tree.topLevelItem(0)
             self.source_tree.setCurrentItem(next_item)
             next_item.setSelected(True)
