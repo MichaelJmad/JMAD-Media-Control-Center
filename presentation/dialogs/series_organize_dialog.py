@@ -1198,6 +1198,9 @@ class SeriesOrganizeDialog(QDialog):
         Scans all folders in target tree and preview table for duplicate filenames.
         Highlights conflicting files in red and disables execute button.
         """
+        # Block signals to prevent infinite loop from color changes triggering cellChanged
+        self.preview_table.blockSignals(True)
+
         has_conflicts = False
 
         # Reset all colors in target tree first
@@ -1291,6 +1294,9 @@ class SeriesOrganizeDialog(QDialog):
                             item = self.preview_table.item(row, col)
                             if item:
                                 item.setForeground(QColor(255, 100, 100))  # Red
+
+        # Unblock signals now that we're done modifying items
+        self.preview_table.blockSignals(False)
 
         # Enable/disable execute button based on conflicts
         self.execute_btn.setEnabled(not has_conflicts)
