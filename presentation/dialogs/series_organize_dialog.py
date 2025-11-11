@@ -2,7 +2,7 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTreeWidget, QTreeWidgetItem, QSplitter, QWidget, QGroupBox,
-    QLineEdit, QInputDialog, QMessageBox, QTableWidget, QTableWidgetItem, QHeaderView, QMenu
+    QLineEdit, QInputDialog, QMessageBox, QTableWidget, QTableWidgetItem, QHeaderView, QMenu, QCheckBox
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
@@ -221,6 +221,12 @@ class SeriesOrganizeDialog(QDialog):
         widget = QGroupBox("Source (Staging)")
         layout = QVBoxLayout(widget)
 
+        # Add checkbox to toggle subdirectory display
+        self.show_subdirs_checkbox = QCheckBox("Show subdirectory structure")
+        self.show_subdirs_checkbox.setChecked(False)
+        self.show_subdirs_checkbox.stateChanged.connect(self._on_show_subdirs_changed)
+        layout.addWidget(self.show_subdirs_checkbox)
+
         self.source_tree = QTreeWidget()
         self.source_tree.setHeaderLabels(["Folder / File"])
         self.source_tree.setSelectionMode(QTreeWidget.ExtendedSelection)
@@ -337,6 +343,8 @@ class SeriesOrganizeDialog(QDialog):
 
     def _load_source_files(self):
         """Load source files from staging directory into source tree"""
+        show_subdirs = self.show_subdirs_checkbox.isChecked()
+
         for folder_name, full_path in self.folder_paths.items():
             folder_path = Path(full_path)
 
@@ -370,13 +378,18 @@ class SeriesOrganizeDialog(QDialog):
             # Find video files in folder
             files = []
 
-            for file_path in folder_path.rglob('*'):
-                if file_path.is_file() and file_path.suffix.lower() in video_exts:
-                    files.append(file_path)
-                    file_item = QTreeWidgetItem([file_path.name])
-                    file_item.setData(0, Qt.UserRole, str(file_path))  # Store full path
-                    file_item.setData(0, Qt.UserRole + 1, "file")  # Mark as file
-                    folder_item.addChild(file_item)
+            if show_subdirs:
+                # Build tree structure with subdirectories
+                self._add_files_with_subdirs(folder_item, folder_path, folder_path, video_exts, files)
+            else:
+                # Flat display - all files directly under folder
+                for file_path in folder_path.rglob('*'):
+                    if file_path.is_file() and file_path.suffix.lower() in video_exts:
+                        files.append(file_path)
+                        file_item = QTreeWidgetItem([file_path.name])
+                        file_item.setData(0, Qt.UserRole, str(file_path))  # Store full path
+                        file_item.setData(0, Qt.UserRole + 1, "file")  # Mark as file
+                        folder_item.addChild(file_item)
 
             self.source_files[folder_name] = files
             self.source_tree.addTopLevelItem(folder_item)
@@ -393,6 +406,66 @@ class SeriesOrganizeDialog(QDialog):
         # Save initial state for undo/redo
         self._save_history_state()
 
+    def _add_files_with_subdirs(self, parent_item, root_path, current_path, video_exts, files_list):
+        """Recursively add files and subdirectories to tree
+
+        Args:
+            parent_item: QTreeWidgetItem to add children to
+            root_path: Root path of the top-level folder
+            current_path: Current directory being processed
+            video_exts: List of video file extensions
+            files_list: List to accumulate all file paths
+        """
+        # Get all items in current directory (non-recursive)
+        try:
+            items = sorted(current_path.iterdir())
+        except (OSError, PermissionError):
+            return
+
+        # Separate directories and files
+        dirs = [item for item in items if item.is_dir()]
+        files = [item for item in items if item.is_file() and item.suffix.lower() in video_exts]
+
+        # Add subdirectories first
+        for dir_path in dirs:
+            dir_item = QTreeWidgetItem([dir_path.name])
+            dir_item.setData(0, Qt.UserRole, str(dir_path))
+            dir_item.setData(0, Qt.UserRole + 1, "folder")
+            parent_item.addChild(dir_item)
+
+            # Recursively add contents of this subdirectory
+            self._add_files_with_subdirs(dir_item, root_path, dir_path, video_exts, files_list)
+
+        # Add files in current directory
+        for file_path in files:
+            files_list.append(file_path)
+            file_item = QTreeWidgetItem([file_path.name])
+            file_item.setData(0, Qt.UserRole, str(file_path))
+            file_item.setData(0, Qt.UserRole + 1, "file")
+            parent_item.addChild(file_item)
+
+    def _restore_source_selection(self, selected_paths):
+        """Restore selection in source tree after reload
+
+        Args:
+            selected_paths: List of file/folder paths that were previously selected
+        """
+        if not selected_paths:
+            return
+
+        # Recursively search tree for items with matching paths
+        def find_and_select(item):
+            path = item.data(0, Qt.UserRole)
+            if path in selected_paths:
+                item.setSelected(True)
+
+            for i in range(item.childCount()):
+                find_and_select(item.child(i))
+
+        # Search all top-level items
+        for i in range(self.source_tree.topLevelItemCount()):
+            find_and_select(self.source_tree.topLevelItem(i))
+
     def _on_source_selection_changed(self):
         """Handle selection change in source tree"""
         selected = self.source_tree.selectedItems()
@@ -404,6 +477,22 @@ class SeriesOrganizeDialog(QDialog):
         self.move_to_movies_btn.setEnabled(has_selection)
         self.move_to_custom_btn.setEnabled(has_selection)
         self.renumber_episodes_btn.setEnabled(has_selection)
+
+    def _on_show_subdirs_changed(self):
+        """Handle subdirectory display checkbox toggle"""
+        # Save current selection paths before reloading
+        selected_paths = []
+        for item in self.source_tree.selectedItems():
+            path = item.data(0, Qt.UserRole)
+            if path:
+                selected_paths.append(path)
+
+        # Clear and reload source tree
+        self.source_tree.clear()
+        self._load_source_files()
+
+        # Restore selection
+        self._restore_source_selection(selected_paths)
 
     def _on_source_item_hover(self, item, column):
         """Show tooltip with full name when hovering over items with long names
