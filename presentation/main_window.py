@@ -633,63 +633,59 @@ class MainWindow(QMainWindow):
 
         # Only handle key press events on the media tree
         if obj == self.media_tree and event.type() == QEvent.KeyPress:
-            key_event = event
-
             # Check if any items are selected
             selected_items = self.media_tree.selectedItems()
             if not selected_items:
                 # No selection, don't handle hotkeys
                 return super().eventFilter(obj, event)
 
-            # Get the key and modifiers
-            key = key_event.key()
-            modifiers = key_event.modifiers()
+            # Get the pressed key
+            key = event.key()
+            modifiers = event.modifiers()
 
-            # Filter out KeypadModifier and GroupSwitchModifier which Qt adds automatically
-            relevant_modifiers = modifiers & (Qt.ShiftModifier | Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)
-
-            # Create key sequence string
-            key_sequence = QKeySequence(key | int(relevant_modifiers)).toString()
-
-            # For single letter keys without modifiers, also try without Shift
-            # (Qt sometimes includes Shift for capital letters)
-            key_sequence_no_shift = None
-            if relevant_modifiers == Qt.ShiftModifier:
-                key_sequence_no_shift = QKeySequence(key).toString()
+            # Get text representation of the key press
+            text = event.text().upper() if event.text() else ""
 
             # Check against configured hotkeys
             hotkeys = self.settings.hotkeys
 
-            # Helper function to check if hotkey matches
-            def matches_hotkey(action_key: str) -> bool:
-                configured = hotkeys.get(action_key, "")
-                if not configured:
-                    return False
-                # Try exact match first
-                if configured == key_sequence:
+            # Create key sequence for comparison
+            # Filter out keyboard-specific modifiers
+            clean_modifiers = modifiers & (Qt.ShiftModifier | Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)
+
+            # For single letter keys without Ctrl/Alt/Meta, just compare the letter
+            if not (clean_modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)):
+                # Single key press (possibly with Shift)
+                configured_anime = hotkeys.get("open_anime_dialog", "").upper()
+                configured_movie = hotkeys.get("open_movie_dialog", "").upper()
+                configured_tv = hotkeys.get("open_tv_dialog", "").upper()
+
+                if text and len(configured_anime) == 1 and text == configured_anime:
+                    self._on_organize_with_type(MediaTypeDialog.ANIME)
                     return True
-                # Try without shift for single letters
-                if key_sequence_no_shift and configured == key_sequence_no_shift:
+
+                if text and len(configured_movie) == 1 and text == configured_movie:
+                    self._on_organize_with_type(MediaTypeDialog.MOVIES)
                     return True
-                # Try case-insensitive for single letters
-                if len(configured) == 1 and len(key_sequence) == 1:
-                    return configured.upper() == key_sequence.upper()
-                return False
 
-            # Open Anime Dialog (default: A)
-            if matches_hotkey("open_anime_dialog"):
-                self._on_organize_with_type(MediaTypeDialog.ANIME)
-                return True
+                if text and len(configured_tv) == 1 and text == configured_tv:
+                    self._on_organize_with_type(MediaTypeDialog.TV_SERIES)
+                    return True
+            else:
+                # Complex key sequence with modifiers
+                key_sequence = QKeySequence(key | int(clean_modifiers)).toString()
 
-            # Open Movie Dialog (default: M)
-            if matches_hotkey("open_movie_dialog"):
-                self._on_organize_with_type(MediaTypeDialog.MOVIES)
-                return True
+                if hotkeys.get("open_anime_dialog") == key_sequence:
+                    self._on_organize_with_type(MediaTypeDialog.ANIME)
+                    return True
 
-            # Open TV Series Dialog (default: T)
-            if matches_hotkey("open_tv_dialog"):
-                self._on_organize_with_type(MediaTypeDialog.TV_SERIES)
-                return True
+                if hotkeys.get("open_movie_dialog") == key_sequence:
+                    self._on_organize_with_type(MediaTypeDialog.MOVIES)
+                    return True
+
+                if hotkeys.get("open_tv_dialog") == key_sequence:
+                    self._on_organize_with_type(MediaTypeDialog.TV_SERIES)
+                    return True
 
         # Pass event to base class
         return super().eventFilter(obj, event)
@@ -1365,6 +1361,8 @@ class MainWindow(QMainWindow):
         Returns:
             Number of non-media files removed
         """
+        from PySide6.QtWidgets import QApplication
+
         VIDEO_EXTENSIONS = {
             '.mkv', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm',
             '.m4v', '.mpg', '.mpeg', '.3gp', '.ogv', '.ts'
@@ -1387,13 +1385,19 @@ class MainWindow(QMainWindow):
                             # Non-media file - remove it
                             try:
                                 file_path.unlink()
-                                self.log(f"Removed non-media file: {file_path.name}")
                                 removed_count += 1
+                                # Only log every 10 files to reduce UI updates
+                                if removed_count % 10 == 0:
+                                    self.log(f"Removed {removed_count} non-media files...")
+                                    QApplication.processEvents()  # Keep UI responsive
                             except Exception as e:
                                 self.log(f"Could not remove {file_path.name}: {e}")
 
             except (OSError, PermissionError) as e:
                 self.log(f"Could not access folder {folder}: {e}")
+
+        if removed_count > 0:
+            self.log(f"Removed {removed_count} non-media file(s) total")
 
         return removed_count
 
@@ -1405,6 +1409,7 @@ class MainWindow(QMainWindow):
             staging_path: Staging directory path
         """
         import os
+        from PySide6.QtWidgets import QApplication
 
         # Collect all folders to check (including parent folders)
         all_folders_to_check = set()
@@ -1423,6 +1428,7 @@ class MainWindow(QMainWindow):
         # Sort by depth (deepest first) to remove from bottom up
         sorted_folders = sorted(all_folders_to_check, key=lambda p: len(Path(p).parts), reverse=True)
 
+        removed_count = 0
         for folder_path in sorted_folders:
             try:
                 folder_path = Path(folder_path)
@@ -1434,15 +1440,23 @@ class MainWindow(QMainWindow):
                 try:
                     if not any(folder_path.iterdir()):
                         folder_path.rmdir()
-                        self.log(f"Removed empty folder: {folder_path}")
+                        removed_count += 1
+                        # Process events every 5 folders to keep UI responsive
+                        if removed_count % 5 == 0:
+                            QApplication.processEvents()
                 except StopIteration:
                     # Folder is empty
                     folder_path.rmdir()
-                    self.log(f"Removed empty folder: {folder_path}")
+                    removed_count += 1
+                    if removed_count % 5 == 0:
+                        QApplication.processEvents()
 
             except Exception as e:
                 # Silently skip folders that can't be removed (may have files or be in use)
                 pass
+
+        if removed_count > 0:
+            self.log(f"Removed {removed_count} empty folder(s)")
 
     def _execute_organize(self, folder_names: List[str], target_dir: str):
         """Execute organize operation
