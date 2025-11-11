@@ -702,6 +702,10 @@ class SeriesOrganizeDialog(QDialog):
         # Get extension
         ext = Path(original_name).suffix
 
+        # Specials (season 0) - keep original name
+        if season_num == 0:
+            return original_name
+
         # Extract episode number using the improved parser
         # Try with full path first (to capture folder hints), then fall back to just filename
         ep_num = self.episode_parser.parse_episode_only(original_path)
@@ -720,7 +724,7 @@ class SeriesOrganizeDialog(QDialog):
         else:
             title_prefix = ""
 
-        if season_num >= 0:
+        if season_num > 0:
             # Series episode - format as "Title S##E##.ext"
             return f"{title_prefix}S{season_num:02d}E{ep_num:02d}{ext}"
         elif season_num == -1:
