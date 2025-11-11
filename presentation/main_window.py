@@ -597,19 +597,12 @@ class MainWindow(QMainWindow):
         Returns:
             True if event was handled, False otherwise
         """
-        from PySide6.QtCore import QEvent
+        from PySide6.QtCore import QEvent, Qt
         from PySide6.QtGui import QKeyEvent
 
         # Only handle key press events on the media tree
         if obj == self.media_tree and event.type() == QEvent.KeyPress:
             key_event = event
-
-            # Get the key sequence for this event
-            key = key_event.key()
-            modifiers = key_event.modifiers()
-
-            # Create key sequence string
-            key_sequence = QKeySequence(key | int(modifiers)).toString()
 
             # Check if any items are selected
             selected_items = self.media_tree.selectedItems()
@@ -617,21 +610,53 @@ class MainWindow(QMainWindow):
                 # No selection, don't handle hotkeys
                 return super().eventFilter(obj, event)
 
+            # Get the key and modifiers
+            key = key_event.key()
+            modifiers = key_event.modifiers()
+
+            # Filter out KeypadModifier and GroupSwitchModifier which Qt adds automatically
+            relevant_modifiers = modifiers & (Qt.ShiftModifier | Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)
+
+            # Create key sequence string
+            key_sequence = QKeySequence(key | int(relevant_modifiers)).toString()
+
+            # For single letter keys without modifiers, also try without Shift
+            # (Qt sometimes includes Shift for capital letters)
+            key_sequence_no_shift = None
+            if relevant_modifiers == Qt.ShiftModifier:
+                key_sequence_no_shift = QKeySequence(key).toString()
+
             # Check against configured hotkeys
             hotkeys = self.settings.hotkeys
 
+            # Helper function to check if hotkey matches
+            def matches_hotkey(action_key: str) -> bool:
+                configured = hotkeys.get(action_key, "")
+                if not configured:
+                    return False
+                # Try exact match first
+                if configured == key_sequence:
+                    return True
+                # Try without shift for single letters
+                if key_sequence_no_shift and configured == key_sequence_no_shift:
+                    return True
+                # Try case-insensitive for single letters
+                if len(configured) == 1 and len(key_sequence) == 1:
+                    return configured.upper() == key_sequence.upper()
+                return False
+
             # Open Anime Dialog (default: A)
-            if hotkeys.get("open_anime_dialog") == key_sequence:
+            if matches_hotkey("open_anime_dialog"):
                 self._on_organize_with_type(MediaTypeDialog.ANIME)
                 return True
 
             # Open Movie Dialog (default: M)
-            if hotkeys.get("open_movie_dialog") == key_sequence:
+            if matches_hotkey("open_movie_dialog"):
                 self._on_organize_with_type(MediaTypeDialog.MOVIES)
                 return True
 
             # Open TV Series Dialog (default: T)
-            if hotkeys.get("open_tv_dialog") == key_sequence:
+            if matches_hotkey("open_tv_dialog"):
                 self._on_organize_with_type(MediaTypeDialog.TV_SERIES)
                 return True
 
@@ -653,23 +678,18 @@ class MainWindow(QMainWindow):
         # Create context menu
         menu = QMenu(self)
 
-        # Add "Organize As" submenu for direct media type selection
-        organize_menu = menu.addMenu("Organize As...")
+        # Add organize actions directly in menu (not as submenu)
+        organize_label = menu.addAction("Organize As:")
+        organize_label.setEnabled(False)  # Make it a label, not clickable
 
-        tv_action = organize_menu.addAction("TV Show")
+        tv_action = menu.addAction("  TV Show")
         tv_action.triggered.connect(lambda: self._on_organize_with_type(MediaTypeDialog.TV_SERIES))
 
-        anime_action = organize_menu.addAction("Anime")
+        anime_action = menu.addAction("  Anime")
         anime_action.triggered.connect(lambda: self._on_organize_with_type(MediaTypeDialog.ANIME))
 
-        movie_action = organize_menu.addAction("Movie")
+        movie_action = menu.addAction("  Movie")
         movie_action.triggered.connect(lambda: self._on_organize_with_type(MediaTypeDialog.MOVIES))
-
-        menu.addSeparator()
-
-        # Add original "Organize..." (with dialog selection)
-        organize_action = menu.addAction("Organize... (Choose Type)")
-        organize_action.triggered.connect(self._on_organize_requested)
 
         menu.addSeparator()
 
