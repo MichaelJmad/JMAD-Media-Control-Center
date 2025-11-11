@@ -81,19 +81,44 @@ class SeriesOrganizeDialog(QDialog):
         # Take the first folder as the base
         folder_name = folders[0]
 
-        # Remove common patterns
-        # Season indicators: S01, S02, Season 1, Season 01, etc.
-        title = re.sub(r'\s+S\d{1,2}(?:\s|$)', ' ', folder_name, flags=re.I)
-        title = re.sub(r'\s+Season\s*\d{1,2}(?:\s|$)', ' ', title, flags=re.I)
+        # First, replace dots and underscores with spaces (before pattern matching)
+        title = re.sub(r'[._]', ' ', folder_name)
 
-        # Quality tags: [1080p], [720p], [BD], [BluRay], etc.
+        # Remove release group tags (typically -GROUPNAME at the end)
+        title = re.sub(r'-[A-Z0-9]+$', '', title, flags=re.I)
+
+        # Remove everything after season indicator (including the season tag itself)
+        # This handles: S01, S1, Season 1, Season 01
+        title = re.sub(r'\s+S(?:eason)?\s*\d{1,2}.*$', '', title, flags=re.I)
+
+        # Remove quality/resolution tags
+        title = re.sub(r'\b\d{3,4}p\b', '', title, flags=re.I)  # 720p, 1080p, 2160p
+        title = re.sub(r'\b4K\b', '', title, flags=re.I)
+        title = re.sub(r'\bp\b', '', title, flags=re.I)  # Standalone 'p'
+
+        # Remove source tags
+        title = re.sub(r'\b(BluRay|BDRip|BD|WEB-DL|WEBRip|HDTV|DVDRip|BRRip)\b', '', title, flags=re.I)
+
+        # Remove codec/encoding tags
+        title = re.sub(r'\b(x264|x265|H\.?264|H\.?265|HEVC|AVC|10-?Bit|8-?Bit)\b', '', title, flags=re.I)
+        title = re.sub(r'\b\d+\s*bits?\b', '', title, flags=re.I)  # "10 bits", "8 bit"
+
+        # Remove audio tags
+        title = re.sub(r'\b(Dual[\s-]?Audio|Multi[\s-]?Audio|AAC|FLAC|DTS|DD|AC3|TrueHD|Atmos)\b', '', title, flags=re.I)
+        title = re.sub(r'\bFLAC\d+\.\d+\b', '', title, flags=re.I)  # FLAC5.1, FLAC2.0
+
+        # Remove subtitle tags
+        title = re.sub(r'\b(Subbed|Dubbed|Multi[\s-]?Sub)\b', '', title, flags=re.I)
+
+        # Remove release info
+        title = re.sub(r'\b(REPACK|PROPER|REAL|RETAIL)\b', '', title, flags=re.I)
+
+        # Remove content in brackets and parentheses
         title = re.sub(r'\[.*?\]', '', title)
+        title = re.sub(r'\(.*?\)', '', title)
 
-        # Year tags: (2019), 2020, etc.
-        title = re.sub(r'\(?\d{4}\)?', '', title)
-
-        # Common release group patterns
-        title = re.sub(r'\[.*?Subs\]', '', title, flags=re.I)
+        # Remove year tags (4 consecutive digits)
+        title = re.sub(r'\b\d{4}\b', '', title)
 
         # Clean up extra spaces and trim
         title = re.sub(r'\s+', ' ', title).strip()

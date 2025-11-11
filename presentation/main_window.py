@@ -222,6 +222,9 @@ class MainWindow(QMainWindow):
         self.media_tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.media_tree.customContextMenuRequested.connect(self._show_tree_context_menu)
 
+        # Install event filter for hotkey handling
+        self.media_tree.installEventFilter(self)
+
         # Connect selection change to update organize button
         self.media_tree.itemSelectionChanged.connect(self._on_tree_selection_changed)
 
@@ -583,6 +586,57 @@ class MainWindow(QMainWindow):
             self.redo_btn.setToolTip(f"Redo: {self.history.get_redo_description()}")
         else:
             self.redo_btn.setToolTip("Nothing to redo")
+
+    def eventFilter(self, obj, event):
+        """Handle events for child widgets (media tree hotkeys)
+
+        Args:
+            obj: Object that triggered the event
+            event: The event
+
+        Returns:
+            True if event was handled, False otherwise
+        """
+        from PySide6.QtCore import QEvent
+        from PySide6.QtGui import QKeyEvent
+
+        # Only handle key press events on the media tree
+        if obj == self.media_tree and event.type() == QEvent.KeyPress:
+            key_event = event
+
+            # Get the key sequence for this event
+            key = key_event.key()
+            modifiers = key_event.modifiers()
+
+            # Create key sequence string
+            key_sequence = QKeySequence(key | int(modifiers)).toString()
+
+            # Check if any items are selected
+            selected_items = self.media_tree.selectedItems()
+            if not selected_items:
+                # No selection, don't handle hotkeys
+                return super().eventFilter(obj, event)
+
+            # Check against configured hotkeys
+            hotkeys = self.settings.hotkeys
+
+            # Open Anime Dialog (default: A)
+            if hotkeys.get("open_anime_dialog") == key_sequence:
+                self._on_organize_with_type(MediaTypeDialog.ANIME)
+                return True
+
+            # Open Movie Dialog (default: M)
+            if hotkeys.get("open_movie_dialog") == key_sequence:
+                self._on_organize_with_type(MediaTypeDialog.MOVIES)
+                return True
+
+            # Open TV Series Dialog (default: T)
+            if hotkeys.get("open_tv_dialog") == key_sequence:
+                self._on_organize_with_type(MediaTypeDialog.TV_SERIES)
+                return True
+
+        # Pass event to base class
+        return super().eventFilter(obj, event)
 
     def _show_tree_context_menu(self, position):
         """Show context menu for media tree
@@ -1210,15 +1264,8 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 errors.append(f"Failed to move {original_path.name}: {e}")
 
-        # Remove non-media files
-        non_media_removed = 0
-        for file_path in operations["non_media_files"]:
-            try:
-                Path(file_path).unlink()
-                self.log(f"Removed non-media file: {Path(file_path).name}")
-                non_media_removed += 1
-            except Exception as e:
-                self.log(f"Could not remove {Path(file_path).name}: {e}")
+        # Remove non-media files from source folders
+        non_media_removed = self._cleanup_non_media_files(source_folders_to_check)
 
         # Clean up empty source folders
         self._cleanup_empty_folders(source_folders_to_check, staging_path)
@@ -1259,7 +1306,7 @@ class MainWindow(QMainWindow):
         self.scan_media()
 
     def _cleanup_non_media_files(self, folders: set) -> int:
-        """Remove non-media files from folders
+        """Remove non-media files from folders recursively
 
         Args:
             folders: Set of folder paths to clean
@@ -1280,9 +1327,10 @@ class MainWindow(QMainWindow):
                 if not folder_path.exists() or not folder_path.is_dir():
                     continue
 
-                # Find all files in this folder (not recursive, just direct children)
-                for file_path in folder_path.iterdir():
-                    if file_path.is_file():
+                # Recursively find all files in this folder tree
+                for root, dirs, files in os.walk(str(folder_path)):
+                    for filename in files:
+                        file_path = Path(root) / filename
                         ext = file_path.suffix.lower()
                         if ext not in VIDEO_EXTENSIONS:
                             # Non-media file - remove it
@@ -1299,44 +1347,51 @@ class MainWindow(QMainWindow):
         return removed_count
 
     def _cleanup_empty_folders(self, folders: set, staging_path: Path):
-        """Clean up empty folders in staging
+        """Clean up empty folders in staging recursively from bottom up
 
         Args:
             folders: Set of folder paths to check
             staging_path: Staging directory path
         """
-        for folder in sorted(folders, reverse=True):  # Reverse to delete deepest first
-            try:
-                folder_path = Path(folder)
+        import os
 
-                # Only clean folders within staging
-                if not str(folder_path).startswith(str(staging_path)):
+        # Collect all folders to check (including parent folders)
+        all_folders_to_check = set()
+        for folder in folders:
+            folder_path = Path(folder)
+            # Only consider folders within staging
+            if str(folder_path).startswith(str(staging_path)):
+                # Add this folder and all parent folders up to staging
+                current = folder_path
+                while current != staging_path and current.parent != current:
+                    all_folders_to_check.add(current)
+                    current = current.parent
+                    if not str(current).startswith(str(staging_path)):
+                        break
+
+        # Sort by depth (deepest first) to remove from bottom up
+        sorted_folders = sorted(all_folders_to_check, key=lambda p: len(Path(p).parts), reverse=True)
+
+        for folder_path in sorted_folders:
+            try:
+                folder_path = Path(folder_path)
+
+                if not folder_path.exists() or not folder_path.is_dir():
                     continue
 
-                # Check if folder is empty
-                if folder_path.exists() and folder_path.is_dir():
-                    if not any(folder_path.iterdir()):  # Empty
+                # Check if folder is empty (no files or directories)
+                try:
+                    if not any(folder_path.iterdir()):
                         folder_path.rmdir()
                         self.log(f"Removed empty folder: {folder_path}")
-                    else:
-                        # Check if it only contains empty subfolders
-                        all_empty = True
-                        for item in folder_path.iterdir():
-                            if item.is_file() or (item.is_dir() and any(item.iterdir())):
-                                all_empty = False
-                                break
-
-                        if all_empty:
-                            # Remove empty subfolders first
-                            for subfolder in folder_path.iterdir():
-                                if subfolder.is_dir():
-                                    subfolder.rmdir()
-                            # Then remove parent
-                            folder_path.rmdir()
-                            self.log(f"Removed empty folder tree: {folder_path}")
+                except StopIteration:
+                    # Folder is empty
+                    folder_path.rmdir()
+                    self.log(f"Removed empty folder: {folder_path}")
 
             except Exception as e:
-                self.log(f"Could not remove folder {folder}: {e}")
+                # Silently skip folders that can't be removed (may have files or be in use)
+                pass
 
     def _execute_organize(self, folder_names: List[str], target_dir: str):
         """Execute organize operation

@@ -41,7 +41,7 @@ class HotkeysPanel(QWidget):
         "season_18": "Move to Season 18",
         "season_19": "Move to Season 19",
         "season_20": "Move to Season 20",
-        # Quick actions
+        # Quick actions (organize dialog)
         "move_to_specials": "Move to Specials",
         "move_to_movies": "Move to Movies",
         "rename_selected": "Rename Selected File",
@@ -50,6 +50,10 @@ class HotkeysPanel(QWidget):
         "redo": "Redo Last Action",
         "select_all": "Select All Files",
         "execute": "Execute/Apply Changes",
+        # Media tree actions (main window)
+        "open_anime_dialog": "Open Anime Organize Dialog",
+        "open_movie_dialog": "Open Movie Organize Dialog",
+        "open_tv_dialog": "Open TV Series Organize Dialog",
     }
 
     # Group hotkeys by category
@@ -60,9 +64,12 @@ class HotkeysPanel(QWidget):
             "season_11", "season_12", "season_13", "season_14", "season_15",
             "season_16", "season_17", "season_18", "season_19", "season_20"
         ],
-        "Quick Actions": [
+        "Quick Actions (Organize Dialog)": [
             "move_to_specials", "move_to_movies", "rename_selected",
             "delete_selected", "undo", "redo", "select_all", "execute"
+        ],
+        "Media Tree Actions (Main Window)": [
+            "open_anime_dialog", "open_movie_dialog", "open_tv_dialog"
         ]
     }
 
@@ -92,7 +99,7 @@ class HotkeysPanel(QWidget):
         instructions.setWordWrap(True)
         layout.addWidget(instructions)
 
-        # Create two-column layout: Season Assignments (left) and Quick Actions (right)
+        # Create two-column layout: Season Assignments (left) and Actions (right)
         columns_layout = QHBoxLayout()
 
         # Left column: Season Assignments (1-20 combined)
@@ -105,14 +112,20 @@ class HotkeysPanel(QWidget):
         left_column.addWidget(season_group, stretch=1)  # Give it stretch factor
         columns_layout.addLayout(left_column, stretch=1)
 
-        # Right column: Quick Actions
+        # Right column: Quick Actions and Media Tree Actions
         right_column = QVBoxLayout()
 
         quick_actions_group = self._create_category_group(
-            "Quick Actions",
-            self.HOTKEY_CATEGORIES["Quick Actions"]
+            "Quick Actions (Organize Dialog)",
+            self.HOTKEY_CATEGORIES["Quick Actions (Organize Dialog)"]
         )
         right_column.addWidget(quick_actions_group, stretch=1)  # Give it stretch factor
+
+        media_tree_group = self._create_category_group(
+            "Media Tree Actions (Main Window)",
+            self.HOTKEY_CATEGORIES["Media Tree Actions (Main Window)"]
+        )
+        right_column.addWidget(media_tree_group, stretch=0)  # No stretch - keep compact
 
         columns_layout.addLayout(right_column, stretch=1)
 
