@@ -68,7 +68,7 @@ class Settings:
         "season_18": "Ctrl+8",
         "season_19": "Ctrl+9",
         "season_20": "Ctrl+0",
-        # Quick actions
+        # Quick actions (organize dialog)
         "move_to_specials": "S",
         "move_to_movies": "M",
         "rename_selected": "F2",
@@ -77,6 +77,10 @@ class Settings:
         "redo": "Ctrl+Y",
         "select_all": "Ctrl+A",
         "execute": "Ctrl+Return",
+        # Media tree actions (main window)
+        "open_anime_dialog": "A",
+        "open_movie_dialog": "M",
+        "open_tv_dialog": "T",
     })
 
     # Move presets for quick access

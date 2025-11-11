@@ -222,6 +222,9 @@ class MainWindow(QMainWindow):
         self.media_tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.media_tree.customContextMenuRequested.connect(self._show_tree_context_menu)
 
+        # Install event filter for hotkey handling
+        self.media_tree.installEventFilter(self)
+
         # Connect selection change to update organize button
         self.media_tree.itemSelectionChanged.connect(self._on_tree_selection_changed)
 
@@ -583,6 +586,57 @@ class MainWindow(QMainWindow):
             self.redo_btn.setToolTip(f"Redo: {self.history.get_redo_description()}")
         else:
             self.redo_btn.setToolTip("Nothing to redo")
+
+    def eventFilter(self, obj, event):
+        """Handle events for child widgets (media tree hotkeys)
+
+        Args:
+            obj: Object that triggered the event
+            event: The event
+
+        Returns:
+            True if event was handled, False otherwise
+        """
+        from PySide6.QtCore import QEvent
+        from PySide6.QtGui import QKeyEvent
+
+        # Only handle key press events on the media tree
+        if obj == self.media_tree and event.type() == QEvent.KeyPress:
+            key_event = event
+
+            # Get the key sequence for this event
+            key = key_event.key()
+            modifiers = key_event.modifiers()
+
+            # Create key sequence string
+            key_sequence = QKeySequence(key | int(modifiers)).toString()
+
+            # Check if any items are selected
+            selected_items = self.media_tree.selectedItems()
+            if not selected_items:
+                # No selection, don't handle hotkeys
+                return super().eventFilter(obj, event)
+
+            # Check against configured hotkeys
+            hotkeys = self.settings.hotkeys
+
+            # Open Anime Dialog (default: A)
+            if hotkeys.get("open_anime_dialog") == key_sequence:
+                self._on_organize_with_type(MediaTypeDialog.ANIME)
+                return True
+
+            # Open Movie Dialog (default: M)
+            if hotkeys.get("open_movie_dialog") == key_sequence:
+                self._on_organize_with_type(MediaTypeDialog.MOVIES)
+                return True
+
+            # Open TV Series Dialog (default: T)
+            if hotkeys.get("open_tv_dialog") == key_sequence:
+                self._on_organize_with_type(MediaTypeDialog.TV_SERIES)
+                return True
+
+        # Pass event to base class
+        return super().eventFilter(obj, event)
 
     def _show_tree_context_menu(self, position):
         """Show context menu for media tree
