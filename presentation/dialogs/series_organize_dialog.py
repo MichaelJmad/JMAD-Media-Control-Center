@@ -991,23 +991,14 @@ class SeriesOrganizeDialog(QDialog):
         # Extract episode number using the improved parser
         # Try with full path first (to capture folder hints), then fall back to just filename
         ep_num = self.episode_parser.parse_episode_only(original_path)
-
-        # DEBUG: Print what we're parsing
-        print(f"DEBUG _generate_filename:")
-        print(f"  original_path: {original_path!r}")
-        print(f"  original_name: {original_name!r}")
-        print(f"  ep_num from path: {ep_num}")
-
         if ep_num is None:
             ep_num = self.episode_parser.parse_episode_only(original_name)
-            print(f"  ep_num from name: {ep_num}")
 
         # If still no episode found, try basic regex fallback
         if ep_num is None:
             import re
             match = re.search(r'(\d+)', original_name)
             ep_num = int(match.group(1)) if match else 1
-            print(f"  ep_num from fallback regex: {ep_num} (match: {match.group(0) if match else None})")
 
         # Build filename with media title if available
         if self.media_title:
@@ -1017,9 +1008,7 @@ class SeriesOrganizeDialog(QDialog):
 
         if season_num > 0:
             # Series episode - format as "Title S##E##.ext"
-            new_name = f"{title_prefix}S{season_num:02d}E{ep_num:02d}{ext}"
-            print(f"  Generated: {new_name}")
-            return new_name
+            return f"{title_prefix}S{season_num:02d}E{ep_num:02d}{ext}"
         elif season_num == -1:
             # Movie - infer movie title from filename (like movies dialog)
             movie_title = self._infer_movie_title(original_name)
