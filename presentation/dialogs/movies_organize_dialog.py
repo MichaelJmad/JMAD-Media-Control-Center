@@ -171,31 +171,40 @@ class MoviesOrganizeDialog(QDialog):
                 print(f"DEBUG: Path does not exist: {folder_path}")
                 continue
 
-            if not folder_path.is_dir():
-                print(f"DEBUG: Path is not a directory: {folder_path}")
-                continue
-
             folder_media_files = []
             folder_non_media_files = []
 
-            # Recursively find all files
-            try:
-                file_count = 0
-                for file_path in folder_path.rglob("*"):
-                    if file_path.is_file():
-                        file_count += 1
-                        ext = file_path.suffix.lower()
-                        print(f"DEBUG: Checking file '{file_path.name}' with extension '{ext}'")
-                        if ext in VIDEO_EXTENSIONS:
-                            folder_media_files.append(str(file_path))
-                            print(f"DEBUG: ✓ Found media file: {file_path.name}")
-                        else:
-                            folder_non_media_files.append(str(file_path))
-                            print(f"DEBUG: ✗ Non-media file: {file_path.name} (ext: {ext})")
-                print(f"DEBUG: Total files found in folder: {file_count}, media: {len(folder_media_files)}, non-media: {len(folder_non_media_files)}")
-            except (OSError, PermissionError) as e:
-                print(f"DEBUG: Error accessing folder: {e}")
-                pass
+            # Check if this is a loose file (file path instead of folder path)
+            if folder_path.is_file():
+                print(f"DEBUG: Path is a file (loose file): {folder_path}")
+                ext = folder_path.suffix.lower()
+                if ext in VIDEO_EXTENSIONS:
+                    folder_media_files.append(str(folder_path))
+                    print(f"DEBUG: ✓ Loose media file: {folder_path.name}")
+                else:
+                    print(f"DEBUG: ✗ Loose file is not a video: {folder_path.name} (ext: {ext})")
+            elif folder_path.is_dir():
+                # Recursively find all files in directory
+                try:
+                    file_count = 0
+                    for file_path in folder_path.rglob("*"):
+                        if file_path.is_file():
+                            file_count += 1
+                            ext = file_path.suffix.lower()
+                            print(f"DEBUG: Checking file '{file_path.name}' with extension '{ext}'")
+                            if ext in VIDEO_EXTENSIONS:
+                                folder_media_files.append(str(file_path))
+                                print(f"DEBUG: ✓ Found media file: {file_path.name}")
+                            else:
+                                folder_non_media_files.append(str(file_path))
+                                print(f"DEBUG: ✗ Non-media file: {file_path.name} (ext: {ext})")
+                    print(f"DEBUG: Total files found in folder: {file_count}, media: {len(folder_media_files)}, non-media: {len(folder_non_media_files)}")
+                except (OSError, PermissionError) as e:
+                    print(f"DEBUG: Error accessing folder: {e}")
+                    pass
+            else:
+                print(f"DEBUG: Path is neither file nor directory: {folder_path}")
+                continue
 
             # Only add folders that have media files
             if folder_media_files:
