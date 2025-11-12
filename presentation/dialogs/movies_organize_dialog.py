@@ -86,6 +86,9 @@ class MoviesOrganizeDialog(QDialog):
         title_cleaned = re.sub(r'\b(x264|x265|H\.?264|H\.?265|HEVC|AVC|10-?Bit|8-?Bit)\b', '', title_cleaned, flags=re.I)
         title_cleaned = re.sub(r'\b\d+\s*bits?\b', '', title_cleaned, flags=re.I)  # "10 bits", "8 bit"
 
+        # Remove file extensions appearing as text in folder name
+        title_cleaned = re.sub(r'\b(mkv|mp4|avi|m4v|mov|wmv|flv|webm|mpg|mpeg)\b', '', title_cleaned, flags=re.I)
+
         # Remove audio tags
         title_cleaned = re.sub(r'\b(Dual[\s-]?Audio|Multi[\s-]?Audio|AAC|FLAC|DTS|DD|AC3|TrueHD|Atmos)\b', '', title_cleaned, flags=re.I)
         title_cleaned = re.sub(r'\bFLAC\d+\.\d+\b', '', title_cleaned, flags=re.I)  # FLAC5.1, FLAC2.0
@@ -109,11 +112,18 @@ class MoviesOrganizeDialog(QDialog):
             title_cleaned = re.sub(r'\b' + re.escape(year) + r'\b', '', title_cleaned)
             title_cleaned = re.sub(r'[\(\[]' + re.escape(year) + r'[\)\]]', '', title_cleaned)
 
+        # Remove empty parentheses and brackets
+        title_cleaned = re.sub(r'\(\s*\)', '', title_cleaned)
+        title_cleaned = re.sub(r'\[\s*\]', '', title_cleaned)
+
         # Clean up extra spaces
         title_cleaned = re.sub(r'\s+', ' ', title_cleaned).strip()
 
         # Remove trailing dashes, underscores, or parentheses
         title_cleaned = re.sub(r'[\(\[\s\.\-_]+$', '', title_cleaned).strip()
+
+        # Remove leading dashes after cleanup
+        title_cleaned = re.sub(r'^[\s\.\-_]+', '', title_cleaned).strip()
 
         # If we found a year, format as "Title (Year)"
         if year and title_cleaned:
