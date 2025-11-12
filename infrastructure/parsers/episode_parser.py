@@ -23,11 +23,12 @@ class EpisodeParser:
         (re.compile(r"[._\-\s](?<!\d)(\d)(\d{2})(?!\d)[._\-\s]?", re.I), "three_digit"),
         # Common anime pattern: "Series Name - 04" or "Series Name - Episode 04"
         # But NOT ranges like "01 ~ 24" (negative lookahead for tilde)
-        (re.compile(r"\s+-\s+(?:episode\s+)?(\d{1,3})(?!\s*~)(?:[._\-\s]|$)", re.I), "dash_episode"),
-        # Episode only: E01, episode 01, ep 01
-        (re.compile(r"[._\-\s]e(\d{1,3})(?:[._\-\s]|$)", re.I), "episode_only"),
-        (re.compile(r"episode[\s._-]*(\d+)", re.I), "episode_word"),
-        (re.compile(r"ep[\s._-]*(\d+)", re.I), "ep_abbrev"),
+        # Supports version suffixes like v2, v3
+        (re.compile(r"\s+-\s+(?:episode\s+)?(\d{1,3})(?!\s*~)(?:v\d+)?(?:[._\-\s\[]|$)", re.I), "dash_episode"),
+        # Episode only: E01, episode 01, ep 01 (with optional version suffix)
+        (re.compile(r"[._\-\s]e(\d{1,3})(?:v\d+)?(?:[._\-\s\[]|$)", re.I), "episode_only"),
+        (re.compile(r"episode[\s._-]*(\d+)(?:v\d+)?", re.I), "episode_word"),
+        (re.compile(r"ep[\s._-]*(\d+)(?:v\d+)?", re.I), "ep_abbrev"),
         (re.compile(r"part[\s._-]*(\d+)", re.I), "part"),
         # Three digits alone: 001, 005
         (re.compile(r"[._\-\s](?<!\d)(\d{3})(?!\d)[._\-\s]?(?!\d)", re.I), "three_digit_only"),
