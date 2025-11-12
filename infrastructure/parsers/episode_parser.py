@@ -30,12 +30,14 @@ class EpisodeParser:
         (re.compile(r"episode[\s._-]*(\d+)(?:v\d+)?", re.I), "episode_word"),
         (re.compile(r"ep[\s._-]*(\d+)(?:v\d+)?", re.I), "ep_abbrev"),
         (re.compile(r"part[\s._-]*(\d+)", re.I), "part"),
-        # Three digits alone: 001, 005 (at start or after separator)
-        (re.compile(r"(?:^|[._\-\s])(\d{3})(?!\d)(?:[._\-\s]|$)", re.I), "three_digit_only"),
+        # Four digits alone: 1234 (for episodes in thousands, at start or after separator)
+        (re.compile(r"(?:^|(?<=[._\-\s]))(\d{4})(?=[._\-\s]|$)", re.I), "four_digit_only"),
+        # Three digits alone: 001, 054 (at start or after separator)
+        (re.compile(r"(?:^|(?<=[._\-\s]))(\d{3})(?=[._\-\s]|$)", re.I), "three_digit_only"),
         # Two digits alone: 01, 05 (at start or after separator)
-        (re.compile(r"(?:^|[._\-\s])(\d{2})(?!\d)(?:[._\-\s]|$)", re.I), "two_digit_only"),
+        (re.compile(r"(?:^|(?<=[._\-\s]))(\d{2})(?=[._\-\s]|$)", re.I), "two_digit_only"),
         # Single digit alone: 1, 5 (very last resort, at start or after separator)
-        (re.compile(r"(?:^|[._\-\s])(\d)(?!\d)(?:[._\-\s]|$)", re.I), "single_digit_only"),
+        (re.compile(r"(?:^|(?<=[._\-\s]))(\d)(?=[._\-\s]|$)", re.I), "single_digit_only"),
     ]
 
     # Season hint pattern
@@ -86,7 +88,7 @@ class EpisodeParser:
 
                 # Episode only patterns - need to infer season
                 if pattern_type in ("episode_only", "episode_word", "ep_abbrev", "part", "dash_episode",
-                                    "three_digit_only", "two_digit_only", "single_digit_only"):
+                                    "four_digit_only", "three_digit_only", "two_digit_only", "single_digit_only"):
                     episode = int(groups[-1])
                     # Try to find season hint in filename
                     season = cls._find_season_hint(filename)
