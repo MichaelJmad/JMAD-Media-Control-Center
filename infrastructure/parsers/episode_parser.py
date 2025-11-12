@@ -30,14 +30,14 @@ class EpisodeParser:
         (re.compile(r"episode[\s._-]*(\d+)(?:v\d+)?", re.I), "episode_word"),
         (re.compile(r"ep[\s._-]*(\d+)(?:v\d+)?", re.I), "ep_abbrev"),
         (re.compile(r"part[\s._-]*(\d+)", re.I), "part"),
-        # Four digits alone: 1234 (for episodes in thousands, at start or after separator)
-        (re.compile(r"(?:^|(?<=[._\-\s]))(\d{4})(?=[._\-\s]|$)", re.I), "four_digit_only"),
-        # Three digits alone: 001, 054 (at start or after separator)
-        (re.compile(r"(?:^|(?<=[._\-\s]))(\d{3})(?=[._\-\s]|$)", re.I), "three_digit_only"),
-        # Two digits alone: 01, 05 (at start or after separator)
-        (re.compile(r"(?:^|(?<=[._\-\s]))(\d{2})(?=[._\-\s]|$)", re.I), "two_digit_only"),
-        # Single digit alone: 1, 5 (very last resort, at start or after separator)
-        (re.compile(r"(?:^|(?<=[._\-\s]))(\d)(?=[._\-\s]|$)", re.I), "single_digit_only"),
+        # Four digits alone: 1234 (at start or after whitespace only, to avoid matching K-9 style codes)
+        (re.compile(r"(?:^|(?<=\s))(\d{4})(?=\s|[.\-]|$)", re.I), "four_digit_only"),
+        # Three digits alone: 001, 054 (at start or after whitespace only)
+        (re.compile(r"(?:^|(?<=\s))(\d{3})(?=\s|[.\-]|$)", re.I), "three_digit_only"),
+        # Two digits alone: 01, 05 (at start or after whitespace only)
+        (re.compile(r"(?:^|(?<=\s))(\d{2})(?=\s|[.\-]|$)", re.I), "two_digit_only"),
+        # Single digit alone: 1, 5 (very last resort, at start or after whitespace only)
+        (re.compile(r"(?:^|(?<=\s))(\d)(?=\s|[.\-]|$)", re.I), "single_digit_only"),
     ]
 
     # Season hint pattern
