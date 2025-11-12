@@ -30,12 +30,12 @@ class EpisodeParser:
         (re.compile(r"episode[\s._-]*(\d+)(?:v\d+)?", re.I), "episode_word"),
         (re.compile(r"ep[\s._-]*(\d+)(?:v\d+)?", re.I), "ep_abbrev"),
         (re.compile(r"part[\s._-]*(\d+)", re.I), "part"),
-        # Three digits alone: 001, 005
-        (re.compile(r"[._\-\s](?<!\d)(\d{3})(?!\d)[._\-\s]?(?!\d)", re.I), "three_digit_only"),
-        # Two digits alone: 01, 05
-        (re.compile(r"[._\-\s](?<!\d)(\d{2})(?!\d)[._\-\s]?(?!\d)", re.I), "two_digit_only"),
-        # Single digit alone: 1, 5 (very last resort)
-        (re.compile(r"[._\-\s](?<!\d)(\d)(?!\d)(?:[._\-\s]|$)", re.I), "single_digit_only"),
+        # Three digits alone: 001, 005 (at start or after separator)
+        (re.compile(r"(?:^|[._\-\s])(\d{3})(?!\d)(?:[._\-\s]|$)", re.I), "three_digit_only"),
+        # Two digits alone: 01, 05 (at start or after separator)
+        (re.compile(r"(?:^|[._\-\s])(\d{2})(?!\d)(?:[._\-\s]|$)", re.I), "two_digit_only"),
+        # Single digit alone: 1, 5 (very last resort, at start or after separator)
+        (re.compile(r"(?:^|[._\-\s])(\d)(?!\d)(?:[._\-\s]|$)", re.I), "single_digit_only"),
     ]
 
     # Season hint pattern
