@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JMAD Media Control Center (JMCC) — Tactical Media Organizer</title>
+  <meta name="description" content="Official home of JMAD Media Control Center (JMCC). Scan, organize, link metadata, weave watch orders, and manage library updating with zero-bloat precision.">
+  <!-- Google Fonts: Inter & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <!-- FontAwesome for Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="index.css">
+</head>
+<body>
+
+  <!-- Top Glass Navigation -->
+  <nav class="navbar">
+    <div class="nav-container">
+      <div class="logo">
+        <i class="fa-solid fa-microchip logo-icon"></i>
+        <span>JMAD <span class="logo-accent">MCC</span></span>
+      </div>
+      <div class="nav-links">
+        <button class="nav-btn active" data-tab="tab-landing">Features</button>
+        <button class="nav-btn" data-tab="tab-walkthrough">Walkthroughs</button>
+        <button class="nav-btn" data-tab="tab-developer">API & Docs</button>
+      </div>
+      <div class="nav-actions">
+        <a href="#download-section" class="btn-primary btn-sm"><i class="fa-solid fa-download"></i> Get Release</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main Content Container -->
+  <main class="main-content">
+
+    <!-- TAB 1: LANDING & FEATURES -->
+    <section id="tab-landing" class="tab-pane active">
+      <!-- Hero Header -->
+      <header class="hero">
+        <div class="hero-text animate-fade-in">
+          <div class="version-badge">
+            <span class="badge-dot"></span>
+            <span>Version 2.4.2-rc.1 Beta Now Live</span>
+          </div>
+          <h1>Tactical Media Organization<br><span class="accent-text">Without the Bloat</span></h1>
+          <p class="hero-desc">
+            JMAD Media Control Center is a lightning-fast, drive-aware desktop application built for TV and anime collectors. Take control of messy staging paths, automate metadata linking, weave chronological watch orders, and execute atomic library updates.
+          </p>
+          <div class="hero-ctas">
+            <a href="#download-section" class="btn-primary"><i class="fa-solid fa-download"></i> Download for Windows</a>
+            <button class="btn-secondary" onclick="switchTab('tab-walkthrough')"><i class="fa-solid fa-circle-play"></i> Watch Walkthroughs</button>
+          </div>
+          <div class="hero-meta">
+            <span><i class="fa-brands fa-windows"></i> Windows 10/11 x64</span>
+            <span class="meta-separator">•</span>
+            <span>Closed Source Distribution</span>
+            <span class="meta-separator">•</span>
+            <span class="crypto-chip" onclick="copyText('e77da62f540eb690e98eebd649f7362333866ac58c85a9752cdf2779e0c15146', this)">
+              SHA-256: e77da6... <i class="fa-regular fa-copy"></i>
+            </span>
+          </div>
+        </div>
+
+        <div class="hero-visual animate-slide-up">
+          <div class="mockup-frame">
+            <div class="mockup-header">
+              <span class="mockup-dot red"></span>
+              <span class="mockup-dot yellow"></span>
+              <span class="mockup-dot green"></span>
+              <span class="mockup-title">JMAD Media Control Center v2.4.2</span>
+            </div>
+            <img src="assets/hero_jmad_app_mockup.jpg" alt="JMAD Media Control Center Dashboard Mockup" class="mockup-img">
+          </div>
+        </div>
+      </header>
+
+      <!-- Key Performance Metrics Grid -->
+      <section class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-icon"><i class="fa-solid fa-bolt"></i></div>
+          <div class="metric-val">&lt; 100ms</div>
+          <div class="metric-label">App Initialization & SQLite Startup</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-icon"><i class="fa-solid fa-share-nodes"></i></div>
+          <div class="metric-val">0-Jitter</div>
+          <div class="metric-label">React Flow Canvas Node Snap Grid</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-icon"><i class="fa-solid fa-shield-halved"></i></div>
+          <div class="metric-val">100% Atomic</div>
+          <div class="metric-label">SQLite Transactions & Path Self-Healing</div>
+        </div>
+      </section>
+
+      <!-- Feature Grid Details -->
+      <section class="features-section">
+        <h2 class="section-title">Engineered for absolute library control</h2>
+        <div class="features-grid">
+          
+          <div class="feature-item">
+            <div class="feature-header">
+              <span class="badge badge-raw">Phase 0 RAW</span>
+              <h3>Intake & Auto-Discovery</h3>
+            </div>
+            <p>Scan directories instantly. JMCC parses episode numbers, series naming patterns, and media streams recursively without modifying files until you approve.</p>
+          </div>
+
+          <div class="feature-item">
+            <div class="feature-header">
+              <span class="badge badge-staged">Phase 1 STAGED</span>
+              <h3>3-Pane Multi-Organize</h3>
+            </div>
+            <p>Select multiple source files, map them using the inline keypad to target seasons, and preview missing placeholders. Execute atomic, error-free directory creation in bulk.</p>
+          </div>
+
+          <div class="feature-item">
+            <div class="feature-header">
+              <span class="badge badge-green">Phase 2 GREEN</span>
+              <h3>Metadata Provider Linking</h3>
+            </div>
+            <p>Query TMDB, TVDB, MAL, or AniList metadata. Compare episode counts and titles with built-in confidence thresholds, or bypass links for local-only entries.</p>
+          </div>
+
+          <div class="feature-item">
+            <div class="feature-header">
+              <span class="badge badge-weaver">Weaver</span>
+              <h3>Chronological Watch Orders</h3>
+            </div>
+            <p>Create visual node-based timelines. Connect anime seasons, movies, and OVAs with direction-aware arrows. Export flat order manifests automatically parsed by Jellyfin/Plex.</p>
+          </div>
+
+          <div class="feature-item">
+            <div class="feature-header">
+              <span class="badge badge-live">Phase 3 LIVE</span>
+              <h3>Asynchronous Library Shifting</h3>
+            </div>
+            <p>Transfer staging folders to permanent libraries. Safe copy-verify-delete move logic manages cross-drive limitations, executing silently in background tasks.</p>
+          </div>
+
+          <div class="feature-item">
+            <div class="feature-header">
+              <span class="badge badge-warning">Watchdog</span>
+              <h3>Deduplication & ID Self-Healing</h3>
+            </div>
+            <p>Same-title release splits prevent conflicts (e.g. 1992 vs 2019 releases). Scans auto-heal duplicate directories by writing unique metadata tags into local database registers.</p>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- Downloads Core Block -->
+      <section id="download-section" class="download-container">
+        <div class="download-card">
+          <div class="download-badge">Official Windows Release</div>
+          <h2>Ready to upgrade your collection pipeline?</h2>
+          <p>Get the latest beta build of JMAD Media Control Center. Contains full UI optimizations, asynchronous merge handlers, and wishlist database fixes.</p>
+          
+          <div class="download-buttons">
+            <a href="https://github.com/MichaelJMAD/JMCC/releases/download/v2.4.2-rc.1/JMAD-Media-Control-Center-Setup-2.4.2-rc.1.exe" id="main-download-btn" class="btn-primary btn-lg">
+              <i class="fa-solid fa-download"></i> Download Setup Installer (.exe)
+            </a>
+            <a href="https://github.com/MichaelJMAD/JMCC/releases/download/v2.4.2-rc.1/JMAD-Media-Control-Center-2.4.2-rc.1-win.zip" id="zip-download-btn" class="btn-secondary">
+              <i class="fa-solid fa-file-zipper"></i> Download Portable Archive (.zip)
+            </a>
+          </div>
+
+          <div class="download-specs">
+            <div class="spec-col">
+              <span class="spec-label">Version</span>
+              <span class="spec-val">v2.4.2-rc.1</span>
+            </div>
+            <div class="spec-col">
+              <span class="spec-label">File Size</span>
+              <span class="spec-val" id="download-size">Calculating...</span>
+            </div>
+            <div class="spec-col">
+              <span class="spec-label">Release Date</span>
+              <span class="spec-val">Aug 14, 2026</span>
+            </div>
+            <div class="spec-col">
+              <span class="spec-label">Target Architecture</span>
+              <span class="spec-val">Windows x64 Portable & NSIS</span>
+            </div>
+          </div>
+
+          <div class="hash-section">
+            <span class="hash-label"><i class="fa-solid fa-fingerprint"></i> SHA-256 HASH VERIFICATION</span>
+            <div class="hash-display">
+              <code id="sha256-setup-hash">Calculating SHA-256...</code>
+              <button class="btn-icon" onclick="copyText(document.getElementById('sha256-setup-hash').innerText, this)" title="Copy SHA-256 Hash">
+                <i class="fa-regular fa-copy"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </section>
+
+    <!-- TAB 2: INTERACTIVE WALKTHROUGH PORTAL -->
+    <section id="tab-walkthrough" class="tab-pane">
+      <div class="walkthrough-layout">
+        
+        <!-- Sidebar Navigation -->
+        <aside class="walkthrough-sidebar">
+          <h3>Getting Started</h3>
+          <p class="sidebar-info">Step-by-step guides explaining the 6 phases of the JMCC collection pipeline.</p>
+          <ul class="walkthrough-menu">
+            <li class="menu-item active" data-step="step1">
+              <span class="step-num">01</span>
+              <div class="menu-text">
+                <span class="menu-title">Intake & Scan</span>
+                <span class="menu-badge badge-raw">Phase 0 RAW</span>
+              </div>
+            </li>
+            <li class="menu-item" data-step="step2">
+              <span class="step-num">02</span>
+              <div class="menu-text">
+                <span class="menu-title">3-Pane Organize</span>
+                <span class="menu-badge badge-staged">Phase 1 STAGED</span>
+              </div>
+            </li>
+            <li class="menu-item" data-step="step3">
+              <span class="step-num">03</span>
+              <div class="menu-text">
+                <span class="menu-title">Metadata Lookup</span>
+                <span class="menu-badge badge-green">Phase 2 GREEN</span>
+              </div>
+            </li>
+            <li class="menu-item" data-step="step4">
+              <span class="step-num">04</span>
+              <div class="menu-text">
+                <span class="menu-title">Watch Order Weaver</span>
+                <span class="menu-badge badge-weaver">Canvas</span>
+              </div>
+            </li>
+            <li class="menu-item" data-step="step5">
+              <span class="step-num">05</span>
+              <div class="menu-text">
+                <span class="menu-title">Wishlist Tracker</span>
+                <span class="menu-badge badge-warning">Missing Media</span>
+              </div>
+            </li>
+            <li class="menu-item" data-step="step6">
+              <span class="step-num">06</span>
+              <div class="menu-text">
+                <span class="menu-title">Library Transfer</span>
+                <span class="menu-badge badge-live">Phase 3 LIVE</span>
+              </div>
+            </li>
+          </ul>
+        </aside>
+
+        <!-- Main Guide Display Panel -->
+        <article class="walkthrough-display">
+          
+          <!-- Step 1 Pane -->
+          <div id="step1" class="step-pane active">
+            <h2>01. Folder Intake & Scanning</h2>
+            <p class="step-lead">Discover incoming file hierarchies and verify file structures with speed and absolute disk isolation.</p>
+            <div class="step-image-wrapper">
+              <img src="assets/hero_jmad_app_mockup.jpg" alt="Intake & Scanning Mockup" class="step-image">
+            </div>
+            <div class="step-details">
+              <h4>Workflow Steps</h4>
+              <ol>
+                <li><strong>Set Staging Directory:</strong> Designate your incoming media downloading or processing drive path in global settings.</li>
+                <li><strong>Automatic Video Probing:</strong> The application spawns recursive directory scanning tasks, reading video containers (MKV, MP4, AVI, etc.) and checking files for video codec/audio channel statistics.</li>
+                <li><strong>State Classification:</strong> Unorganized entries are cataloged as Phase 0 <code>RAW</code> directory listings, registered in the local sqlite system, and rendered in the main staging cards tree.</li>
+              </ol>
+              <div class="callout callout-tip">
+                <i class="fa-solid fa-lightbulb"></i>
+                <p><strong>Waifu Squad Optimization (Mika):</strong> Scans use differential checking. Files with cached matching modified times are skipped, preventing costly disk re-scans on boot.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Step 2 Pane -->
+          <div id="step2" class="step-pane">
+            <h2>02. The 3-Pane Organize Engine</h2>
+            <p class="step-lead">Map messy download filenames into organized, structured season folders in a unified tactical layout.</p>
+            <div class="step-image-wrapper">
+              <img src="assets/organize_dialog_feature.jpg" alt="3-Pane Organize Engine" class="step-image">
+            </div>
+            <div class="step-details">
+              <h4>Workflow Steps</h4>
+              <ol>
+                <li><strong>Source Files Pane (Left):</strong> Browse raw files discovered in staging. Multi-select items using checkboxes. Selection indices and selection totals update in the footer.</li>
+                <li><strong>Keypad Center Panel (Middle):</strong> Click numeric keys to assign the selected files to a target season (e.g. S01, S02), OVA/Special season (S00), or Extras folder. Supports quick-clearing and inline unlinking shortcuts.</li>
+                <li><strong>Organized Target Pane (Right):</strong> Preview the directories to be created. Interleaved ghost placeholders display missing slot numbers to warn you of skipped files.</li>
+                <li><strong>Execution Output:</strong> Click <code>Execute Plan</code>. The filesystem worker performs safe moves, placing media into structured folders, and updates the DB entries to Phase 1 <code>STAGED</code>.</li>
+              </ol>
+              <div class="callout callout-important">
+                <i class="fa-solid fa-circle-exclamation"></i>
+                <p><strong>Safety Lock:</strong> No operations are destructive. All renaming and directory moves take place inside the staging area. Your main library paths remain completely untouched until Phase 3.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Step 3 Pane -->
+          <div id="step3" class="step-pane">
+            <h2>03. Metadata Lookup & Provider Linking</h2>
+            <p class="step-lead">Wire up your media folders to popular databases, downloading posters and mapping external identifiers.</p>
+            <div class="step-image-wrapper">
+              <img src="assets/library_management_feature.jpg" alt="Metadata Provider Linking" class="step-image">
+            </div>
+            <div class="step-details">
+              <h4>Workflow Steps</h4>
+              <ol>
+                <li><strong>Trigger Metadata Scan:</strong> Right-click a staging card or click the search badge to open the database lookup interface.</li>
+                <li><strong>Choose Provider Engine:</strong> Query TMDB, TVDB, MyAnimeList, or AniList metadata. Confidence ratings are calculated based on year offsets, naming matches, and episode count discrepancies.</li>
+                <li><strong>Execute Linking:</strong> Connect the series ID. This triggers the background worker to populate series data and write local NFO and poster assets to the directory, advancing the folder state to Phase 2 <code>GREEN</code>.</li>
+              </ol>
+              <div class="callout callout-note">
+                <i class="fa-solid fa-info-circle"></i>
+                <p><strong>Unlinked Mode:</strong> If a custom series doesn't exist on online databases, you can keep it as an unlinked <code>STAGED</code> item. It will still move cleanly to libraries in Phase 3.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Step 4 Pane -->
+          <div id="step4" class="step-pane">
+            <h2>04. Watch Order Weaver (Canvas Graph Editor)</h2>
+            <p class="step-lead">Visually link TV series, OVA specials, movies, and spin-offs into a single chronological timeline.</p>
+            <div class="step-image-wrapper">
+              <img src="assets/watch_order_weaver_feature.jpg" alt="Watch Order Weaver Canvas" class="step-image">
+            </div>
+            <div class="step-details">
+              <h4>Workflow Steps</h4>
+              <ol>
+                <li><strong>Open Timeline Weaver:</strong> Navigate to the node-based canvas view. The sidebar displays available seasons, chunks, and movies inside your current staging/library structures.</li>
+                <li><strong>Create Timeline Nodes:</strong> Drag anime series segments, movies, or specials onto the canvas workspace. Connect node outputs to downstream inputs using click-and-drag handle connections.</li>
+                <li><strong>Connect Connector Dots:</strong> For placing movies or specials chronologically between specific episodic slots, attach connection links to programmatically generated connectors on the spine.</li>
+                <li><strong>Compile Timeline Export:</strong> Click Save. A deep pathfinding DFS algorithm flattens the connection diagram, writing custom display season/episode offset metadata into individual NFO files or generating playlist files.</li>
+              </ol>
+              <div class="callout callout-tip">
+                <i class="fa-solid fa-shield-halved"></i>
+                <p><strong>Jitter Snapping:</strong> React Flow nodes snap automatically to standard layout grids, preventing overlap. Connectors feature strict handle limits (1 for standard nodes, 2 for junctions) and route automatically on connection.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Step 5 Pane -->
+          <div id="step5" class="step-pane">
+            <h2>05. Wishlist & Missing Media Tracker</h2>
+            <p class="step-lead">Track gaps in episodic releases, register dub vs sub availability, and export missing files manifests.</p>
+            <div class="step-image-wrapper">
+              <img src="assets/wishlist_tracker_feature.jpg" alt="Wishlist Tracker Grid" class="step-image">
+            </div>
+            <div class="step-details">
+              <h4>Workflow Steps</h4>
+              <ol>
+                <li><strong>Automatic Health Check:</strong> The app parses database records and compares folder counts with linked TMDB episode catalogs, auto-flagging gaps as missing episodes.</li>
+                <li><strong>Dubs & Tag Filtering:</strong> Organize your target wishlist based on specific release parameters (e.g. English Dubs, Japanese Subbed, BD Remuxes).</li>
+                <li><strong>Search & Filter Safeguards:</strong> Filter datasets instantly in real-time. Sanitization guards filter out missing database column attributes, preventing crashes.</li>
+              </ol>
+            </div>
+          </div>
+
+          <!-- Step 6 Pane -->
+          <div id="step6" class="step-pane">
+            <h2>06. Moving Staging Items to Libraries</h2>
+            <p class="step-lead">Seamlessly transfer finished staging structures into your live server libraries without locking the UI.</p>
+            <div class="step-image-wrapper">
+              <img src="assets/library_management_feature.jpg" alt="Staging to Library Move Dialog" class="step-image">
+            </div>
+            <div class="step-details">
+              <h4>Workflow Steps</h4>
+              <ol>
+                <li><strong>Select Items to Move:</strong> Open the Move Staging items list. Select all organized staging directories that have passed verification scans.</li>
+                <li><strong>Choose Library Destination:</strong> Map the staging folders to their corresponding main library paths (e.g. Anime, TV Shows, Movies) via dropdown selectors.</li>
+                <li><strong>Background Execution:</strong> Click Move to Library. The wizard dialog registers file copy jobs with the main persistent queue, updates SQLite mappings, and exits immediately. Operations execute in the background.</li>
+              </ol>
+              <div class="callout callout-important">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+                <p><strong>Cross-Drive Verification:</strong> If moving directories across different storage volumes, the service performs file copying, confirms byte parity sizes, and deletes the staging files on success to ensure no file loss occurs on cross-device transfers.</p>
+              </div>
+            </div>
+          </div>
+
+        </article>
+      </div>
+    </section>
+
+    <!-- TAB 3: DEVELOPER API & SYSTEM DOCS -->
+    <section id="tab-developer" class="tab-pane">
+      <div class="developer-layout">
+        
+        <div class="developer-main">
+          <h2>Application Auto-Update Protocol</h2>
+          <p>JMCC features a built-in auto-update worker that polls the release server version endpoint on startup. Below is the API schema for the version verification configuration.</p>
+          
+          <div class="api-block">
+            <div class="api-header">
+              <span class="method">GET</span>
+              <span class="endpoint">https://jmadmedia.com/api/update/version.json</span>
+            </div>
+            <pre><code>{
+  "version": "2.4.2-rc.1",
+  "releaseDate": "2026-08-14T15:00:00Z",
+  "channel": "beta",
+  "downloads": {
+    "windows": {
+      "exe": "https://github.com/MichaelJMAD/JMCC/releases/download/v2.4.2-rc.1/JMAD-Media-Control-Center-Setup-2.4.2-rc.1.exe",
+      "zip": "https://github.com/MichaelJMAD/JMCC/releases/download/v2.4.2-rc.1/JMAD-Media-Control-Center-2.4.2-rc.1-win.zip",
+      "sha256": "a7d9f2e4c8b1a3d5e7f9a2b4c6d8e0f1a3b5c7d9e1f3a5b7c9d1e3f5a7b9c1d3",
+      "sizeBytes": 128491520
+    }
+  },
+  "changelog": [
+    "Fixed Wishlist filters crashing on null or undefined dub/tag arrays",
+    "Resolved staging card 'Probe Required' lock by saving scanned movies and episodes to SQLite",
+    "Decoupled move execution in Merge Wizard to run asynchronously so UI closes immediately",
+    "Enabled Same-Drive folder move optimization for lightning-fast staging transfers"
+  ],
+  "minSupportedVersion": "2.0.0"
+}</code></pre>
+          </div>
+
+          <h3 class="margin-top-lg">System Requirements & Compatibility</h3>
+          <table class="requirements-table">
+            <thead>
+              <tr>
+                <th>Requirement</th>
+                <th>Minimum Specification</th>
+                <th>Recommended Specification</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Operating System</td>
+                <td>Windows 10 64-bit (Build 19041+)</td>
+                <td>Windows 11 64-bit</td>
+              </tr>
+              <tr>
+                <td>Processor</td>
+                <td>Intel Core i3 / AMD Ryzen 3</td>
+                <td>Intel Core i5 / AMD Ryzen 5 or higher</td>
+              </tr>
+              <tr>
+                <td>Memory (RAM)</td>
+                <td>4 GB RAM</td>
+                <td>8 GB RAM or higher</td>
+              </tr>
+              <tr>
+                <td>Disk Storage</td>
+                <td>200 MB for Application Installation</td>
+                <td>SSD for Library database (better-sqlite3 processing)</td>
+              </tr>
+              <tr>
+                <td>Network</td>
+                <td>Required for TMDB/TVDB/MAL queries</td>
+                <td>Broadband connection with API access keys</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h3 class="margin-top-lg">Changelog & Version Notes</h3>
+          <div class="changelog-list">
+            <div class="changelog-item">
+              <span class="changelog-ver">v2.4.2-rc.1 <span class="tag-beta">Active Build</span></span>
+              <span class="changelog-date">August 14, 2026</span>
+              <ul>
+                <li>Fixed WishListModule query crashes when encountering null or undefined database columns.</li>
+                <li>Resolved staging card probe lockouts by writing parsed staging episode/movie entries to SQLite during scanning tasks.</li>
+                <li>Made Move Staging items execution fully asynchronous in the background, closing dialogs immediately on launch.</li>
+                <li>Upgraded move operations to delegate to same-drive volume shifts to speed up transfers.</li>
+              </ul>
+            </div>
+            <div class="changelog-item">
+              <span class="changelog-ver">v2.4.0 <span class="tag-stable">Stable Release</span></span>
+              <span class="changelog-date">August 7, 2026</span>
+              <ul>
+                <li>Implemented the core 2-Tier Relational Database mapping entities and directories.</li>
+                <li>Integrated persistent database-backed central QueueService with startup recovery.</li>
+                <li>Upgraded UI badges with active tooltip popover actions and copy-to-clipboard diagnostics reports.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sidebar Specs Info -->
+        <aside class="developer-sidebar">
+          <div class="spec-sidebar-card">
+            <h3>Waifu Squad System Blueprint</h3>
+            <p>Unified Citadel System development guidelines enforced during development cycles.</p>
+            <ul>
+              <li><strong>Database:</strong> Centralized SQLite (via better-sqlite3)</li>
+              <li><strong>UI Framework:</strong> React & Webpack bundling</li>
+              <li><strong>Canvas:</strong> React Flow (xyflow) node graphs</li>
+              <li><strong>System Integration:</strong> IPC handles, Node FS streams</li>
+            </ul>
+            <div class="architecture-map">
+              <i class="fa-solid fa-diagram-project"></i>
+              <span>Decoupled Orchestrator Layer Layout</span>
+            </div>
+          </div>
+        </aside>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="footer-container">
+      <div class="footer-left">
+        <p>&copy; 2026 JMAD Media. All rights reserved.</p>
+        <p class="squad-tag">Designed in cooperation with the Waifu Planning Squad [Citadel v10.0]</p>
+      </div>
+      <div class="footer-right">
+        <a href="https://github.com/MichaelJMAD/JMCC" target="_blank"><i class="fa-brands fa-github"></i> Releases Repository</a>
+        <a href="#" onclick="switchTab('tab-walkthrough')"><i class="fa-solid fa-book"></i> Documentation</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="index.js"></script>
+</body>
+</html>
