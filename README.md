@@ -1,106 +1,125 @@
-# JMCC Website & Release Portal Setup Guide
+# JMAD Media Control Center (JMCC)
+### The Ultimate Desktop Orchestrator for Media Intake, Organization, and Library Synchronization
 
-This folder contains the official showcase website and update server configuration for **JMAD Media Control Center (JMCC)**.
+Welcome to the **JMAD Media Control Center (JMCC)** repository. JMCC is a high-performance desktop application designed to streamline media file renaming, metadata extraction, staging consolidation, library mapping, and wishlist monitoring across multiple storage drives.
 
-To maintain the application as **closed-source** while distributing release packages and showcasing the app publically, follow this step-by-step infrastructure guide.
-
----
-
-## Part 1: GitHub Repository Architecture
-
-To keep your source code private while sharing the app, use a two-repository setup:
-
-1. **`JMCC-source` (Private Repo):** Holds the actual application source code (everything in `K:\Projects\JMCC` *except* this `website` directory).
-2. **`JMCC` (Public Repo):** Holds *only* the contents of this `website/` directory. This hosts the documentation, landing page, and auto-update configuration via GitHub Pages.
+Built on top of a multi-process desktop architecture, JMCC bridges raw file intake workflows with clean, standardized, home theater-ready media libraries.
 
 ---
 
-## Part 2: Setting up the Public Repository
+## 🚀 Key Capabilities
 
-### 1. Create the Repo
-Go to GitHub and create a new repository:
-- **Repository name:** `JMCC` (or your preferred public name)
-- **Visibility:** **Public**
-- **Initialize this repository with:** Do NOT add a README, `.gitignore`, or License (keep it blank).
+* **3-Process Decoupled Architecture:** Built using **Electron + React 18 + TypeScript 5**. React runs a zero-blocking, fast renderer UI. The Main Process acts as a lightweight event router, while all CPU-intensive tasks (scanning, MediaInfo parsing, recursive folder copying) run inside isolated **Node Worker Threads** or **Utility Processes**.
+* **2-Tier Database Engine:** Leverages a transactional SQLite database (`better-sqlite3`) separating metadata `Entities` from physical disk `Directories`. This handles folder movements and renames without orphan references or metadata loss.
+* **Drive-Aware Staging-to-Library Engine:** Automatically consolidates items across multiple drives, calculates target volume capacities, performs same-drive instant moves where possible, and executes reliable cross-drive **Copy-Verify-Delete** operations.
+* **Side-by-Side Merge Wizard:** When preflight scans detect library title collisions, it loads a side-by-side comparison screen exposing differences in **file sizes, video resolutions, video codecs, and audio formats**, letting you choose which release to preserve.
+* **Integrated Tag-Based Wishlist:** Tracks needed items using custom filter tags (e.g. Dubs, On Hold, Backlog, Needs Fixed). Includes a background **Wishlist Health Checker** that matches local library API IDs (TMDB, AniList, MAL) to automatically purge acquisitions even if file names vary.
+* **Diagnostics & Telemetry:** Features real-time operational logs visible in the console, controlled by centralized debug toggles, and persistent crash reports captured via the custom **BugBox** error monitor.
 
-### 2. Push the Website Directory to GitHub
-Open PowerShell, navigate to this `website/` directory, and run the following commands to initialize and push:
+---
 
-```powershell
-# Navigate to the website directory
-cd K:\Projects\JMCC\website
+## 📂 Repository Structure
 
-# Initialize a new independent git repository
-git init -b main
-
-# Stage all files (html, css, js, mockups, version.json)
-git add .
-
-# Commit files
-git commit -m "Initial commit of JMCC website and update API"
-
-# Link to your new public GitHub repository
-git remote add origin https://github.com/YOUR_GITHUB_USERNAME/JMCC.git
-
-# Force-push to set upstream main branch
-git push -u origin main --force
+```
+JMCC/
+├── docs/                          # Architecture blueprints & decision logs
+│   ├── README.md                  # This file
+│   ├── MASTER_BLUEPRINT.md        # Technical architecture specifications
+│   ├── MODULE_REGISTRY.md         # Inventory of services and functional contracts
+│   ├── SESSION_GATEWAY.md         # Persistent workspace contexts
+│   └── DECISION_LEDGER.md         # Detailed chronological engineering decisions
+│
+├── src/
+│   ├── main/                      # Electron Main Process (Main Thread Orchestrator)
+│   │   ├── main.ts                # Application bootstrapping & window manager
+│   │   ├── ipc/                   # IPC channel registrations (Staging, Library, Settings, etc.)
+│   │   ├── services/              # Core Services (FileSystem, Scanner, Move, Metadata, Wishlist)
+│   │   └── workers/               # Worker Thread tasks (MediaInfo probing, file copying)
+│   │
+│   ├── renderer/                  # React Frontend Process (HTML/CSS/TSX)
+│   │   ├── index.tsx              # React UI entry point
+│   │   ├── App.tsx                # Page router & main wrapper
+│   │   ├── components/            # UI components (Merge Wizard, Wishlist Module, Dialogs)
+│   │   └── styles/                # CSS layout files and themes
+│   │
+│   ├── preload/                   # Electron Context Bridge
+│   │   └── preload.ts             # Safe IPC channel exposure to React
+│   │
+│   └── shared/                    # Shared typings and constants
+│       ├── types/                 # Shared TypeScript interfaces (media, ipc, settings)
+│       └── constants/             # Default patterns, file extensions, configuration defaults
+│
+├── backups/                       # Automatic database and file backups
+├── tmp_restore/                   # Mock media data structures for testing
+└── package.json                   # Script mappings and dependencies
 ```
 
-### 3. Enable GitHub Pages
-1. Go to your repository on GitHub.
-2. Click on **Settings** (gear icon) in the top tabs.
-3. In the left sidebar under "Code and automation", click on **Pages**.
-4. Under "Build and deployment", set the source to **Deploy from a branch**.
-5. Set the branch to **`main`** and folder to **`/ (root)`**.
-6. Click **Save**.
-7. GitHub will deploy the site in 1-2 minutes. Your website URL will be:  
-   `https://YOUR_GITHUB_USERNAME.github.io/JMCC/`
-
 ---
 
-## Part 3: Deploying a Release Package (v2.4.2-rc.1)
+## 🛠️ Installation & Getting Started
 
-### 1. Build the Distribution Assets
-Run the local script in the root of your project:
-```powershell
-.\package.ps1
+### Prerequisites
+* **Node.js LTS** (version 18 or newer recommended)
+* **npm** (comes bundled with Node)
+* **Windows OS** (optimized for Windows File System and PowerShell)
+
+### 1. Clone & Install Dependencies
+Clone the repository and run the package installation script:
+```bash
+git clone https://github.com/MichaelJMAD/JMCC.git
+cd JMCC
+npm install
 ```
-This compiles the application and generates the output packages inside `dist-app/`:
-- `JMAD Media Control Center 2.4.2-rc.1.exe` (Portable executable)
-- `JMAD Media Control Center-2.4.2-rc.1-win.zip` (Portable ZIP archive)
-- `JMAD Media Control Center Setup 2.4.2-rc.1.exe` (NSIS Installer executable)
 
-### 2. Create a GitHub Release
-1. On your public `JMCC` repository page on GitHub, click on **Releases** (on the right-side panel) -> **Create a new release**.
-2. Set the **Choose a tag** field to `v2.4.2-rc.1` (click "Create new tag on publish").
-3. Set the release title to `v2.4.2-rc.1 Beta`.
-4. Write your release notes (changelog).
-5. Drag and drop the generated files from `dist-app/` into the upload box:
-   - `JMAD Media Control Center-2.4.2-rc.1-win.zip`
-   - `JMAD Media Control Center Setup 2.4.2-rc.1.exe`
-6. Click **Publish release**.
+### 2. Startup Scripts
+For convenience, startup and development scripts are available in the root folder:
+* **`run-dev.ps1`**: Executes Webpack in watch mode and spawns the Electron development window.
+* **`launch.ps1`**: Installs dependencies and launches the application.
+* **`package.ps1`**: Installs app dependencies and compiles binary builders.
+
+Alternatively, execute standard commands:
+```bash
+# Compile bundle assets
+npm run build
+
+# Start Electron in development mode
+npm run start
+```
 
 ---
 
-## Part 4: Auto-Update Integration
+## 📦 Build & Packaging
 
-The desktop app performs update checking against the version schema stored in the public repo:  
-`https://YOUR_GITHUB_USERNAME.github.io/JMCC/api/update/version.json`
+To compile a production-ready package (ZIP, portable executable, or NSIS installer), run the package builder script:
+```bash
+npm run package
+```
+This script triggers Webpack compile pipelines, updates app dependencies, and outputs Windows binaries inside the `dist-app/` or `dist/` directories.
 
-### When releasing a new version:
-1. Obtain the final file size (in bytes) and calculate the **SHA-256 hash** of the Setup Installer:
+---
+
+## 💾 Codebase Backups
+
+To create a clean, lightweight backup archive of the workspace source code:
+1. Open PowerShell.
+2. Execute the included bracket-proof backup utility:
    ```powershell
-   Get-FileHash -Algorithm SHA256 "dist-app\JMAD Media Control Center Setup 2.4.2-rc.1.exe"
+   powershell.exe -ExecutionPolicy Bypass -File .\backup.ps1
    ```
-2. Edit `api/update/version.json` in your local website folder:
-   - Update `"version"` to the new tag.
-   - Insert the download link of the new release assets.
-   - Insert the calculated SHA-256 checksum in the `"sha256"` field.
-   - Set the size in bytes under `"sizeBytes"`.
-3. Commit and push the changes:
-   ```powershell
-   git add api/update/version.json
-   git commit -m "Release v2.4.2-rc.1 update metadata"
-   git push origin main
-   ```
-   *Within minutes, all running instances of JMAD Media Control Center will detect the update and prompt the user to download!*
+This script reads `package.json` to fetch the current version, sweeps the directory (omitting `node_modules`, `dist-app`, staging `tmp_restore` media folders, and historical backups), and creates a zipped release package under the parent directory (e.g. `../JMCC-v2.4.2-rc.2-<TIMESTAMP>.zip`).
+
+---
+
+## 🔌 IPC Communication API Contracts
+
+All interaction between the React frontend UI and Node backend services is routed through secure Context Bridge IPC channels using the standard pattern `jmcc:{domain}:{action}`:
+
+| IPC Channel | Mode | Purpose |
+| :--- | :--- | :--- |
+| `jmcc:staging:scan` | Query | Scan staging directories for newly added files. |
+| `jmcc:organize:execute` | Transaction | Execute renaming and organization structures on disk. |
+| `jmcc:move:start` | Queue Task | Begin moving organized folders to configured libraries. |
+| `jmcc:library:list` | Query | Retrieve current items, expected counts, and sizes in library. |
+| `jmcc:wishlist:add` | Mutation | Add media records with custom tags to the wishlist. |
+| `jmcc:wishlist:health-check`| Event | Trigger a manual health scan comparing wishlist to libraries. |
+| `jmcc:bugbox:report` | Log | Capture main-process exceptions and push them to the Diagnostics UI. |
